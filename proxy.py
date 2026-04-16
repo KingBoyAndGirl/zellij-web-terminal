@@ -89,18 +89,9 @@ INJECT_WS_INTERCEPT = """<script>
 // Intercept WebSocket to force session name for multi-device sharing
 // This runs early, before Zellij's module scripts execute
 (function() {
-    console.log('[Hermes] WebSocket interceptor loading...');
     var OriginalWebSocket = window.WebSocket;
     window._termWs = null;  // Terminal WebSocket
     window._ctrlWs = null;  // Control WebSocket
-    // Global paste/send debug log — accessible via window._sendLog in console
-    window._sendLog = [];
-    window._logSend = function(tag, data) {
-        var entry = {tag: tag, data: (typeof data === 'string' ? data.substring(0, 80) : '[BIN]'), ts: Date.now()};
-        window._sendLog.push(entry);
-        // Keep last 100 entries
-        if (window._sendLog.length > 100) window._sendLog.shift();
-    };
     // Default session name, can be overridden by injected script
     window.sessionName = window.sessionName || 'default';
     
@@ -113,7 +104,6 @@ INJECT_WS_INTERCEPT = """<script>
             if (path === '/ws/terminal' || path === '/ws/terminal/') {
                 parsed.pathname = '/ws/terminal/' + window.sessionName;
                 url = parsed.toString();
-                console.log('[Hermes] Modified terminal WS URL to:', url, 'sessionName:', window.sessionName);
             }
         }
         
@@ -130,20 +120,14 @@ INJECT_WS_INTERCEPT = """<script>
                 var now = Date.now();
                 if (typeof data === 'string' && data.length > 0 && data.length < 10000) {
                     if (_lastSent.d === data && (now - _lastSent.t) < 200) {
-                        console.log('[Hermes] ws.send DEDUP dropped:', JSON.stringify(data.substring(0, 50)));
-                        window._logSend('ws.send.DEDUP', data);
                         return;
                     }
                     _lastSent = {d: data, t: now};
                 }
-                window._logSend('ws.send.ACTUAL', data);
-                console.log('[Hermes] ws.send →', JSON.stringify(data.substring(0, 50)), 'len:', data.length);
                 _nativeSend(data);
             };
-            console.log('[Hermes] Terminal WebSocket captured:', url, 'with send dedup');
         } else if (url.indexOf('/ws/control') > -1) {
             window._ctrlWs = ws;
-            console.log('[Hermes] Control WebSocket captured:', url);
         }
         
         return ws;
@@ -165,22 +149,16 @@ INJECT_WS_INTERCEPT = """<script>
             var now = Date.now();
             if (typeof data === 'string' && data.length > 0 && data.length < 10000) {
                 if (window.__wsLast.d === data && (now - window.__wsLast.t) < 200) {
-                    console.log('[Hermes] __wsSend DEDUP dropped:', JSON.stringify(data.substring(0, 50)));
-                    window._logSend('__wsSend.DEDUP', data);
-                    return true; // Pretend it was sent
+                    return true;
                 }
                 window.__wsLast = {d: data, t: now};
             }
-            window._logSend('__wsSend.CALL', data);
-            console.log('[Hermes] __wsSend →', JSON.stringify(data.substring(0, 50)), 'len:', data.length);
             ws.send(data);
             return true;
         }
-        console.warn('[Hermes] wsSend failed: termWs=', !!ws, 'readyState=', ws ? ws.readyState : 'N/A');
         return false;
     };
     
-    console.log('[Hermes] WebSocket interceptor ready, sessionName:', window.sessionName);
 })();
 </script>"""
 
@@ -280,8 +258,6 @@ INJECT_HTML = """<div id="toolbar">
 # JavaScript to inject (button bindings and other logic)
 INJECT_JS = """<script>
 (function() {
-    console.log('[Hermes] Button bindings script loading...');
-    
     // Wait for terminal to be ready
     var term = null;
     var checkInterval = setInterval(function() {
@@ -293,8 +269,6 @@ INJECT_JS = """<script>
     }, 100);
 
     function init() {
-        console.log('[Hermes] Terminal ready, initializing buttons...');
-        
         // Button mappings - ESC sequences
         var keyMap = {
             'btn-esc': '\\x1b',
@@ -344,8 +318,6 @@ INJECT_JS = """<script>
                 (function(data) {
                     btn.addEventListener('pointerdown', function(e) {
                         e.preventDefault();
-                        console.log('[Hermes] Button clicked:', id, 'data:', JSON.stringify(data));
-                        // Use the global __wsSend function from the WebSocket interceptor
                         if (typeof window.__wsSend === 'function') {
                             window.__wsSend(data);
                         } else {
@@ -410,38 +382,22 @@ INJECT_JS = """<script>
         var _lastPastedText = '';
         function doPaste() {
             var now = Date.now();
-            console.log('[Hermes] doPaste called, delta:', now - _pasteCooldown, 'ms');
-            window._logSend('doPaste.CALL', 'delta=' + (now - _pasteCooldown));
             if (now - _pasteCooldown < 500) {
-                console.log('[Hermes] doPaste COOLDOWN blocked, delta:', now - _pasteCooldown);
-                window._logSend('doPaste.COOLDOWN', '');
                 return;
             }
             _pasteCooldown = now;
             _lastPastedText = '';
-            console.log('[Hermes] doPaste → reading clipboard...');
             if (navigator.clipboard && navigator.clipboard.readText) {
                 navigator.clipboard.readText().then(function(text) {
-                    console.log('[Hermes] clipboard.readText resolved, len:', text ? text.length : 0, 'preview:', JSON.stringify((text || '').substring(0, 40)));
-                    window._logSend('doPaste.CLIPBOARD', text ? text.substring(0, 40) : 'NULL');
                     if (text && text !== _lastPastedText) {
                         _lastPastedText = text;
-                        console.log('[Hermes] doPaste → __wsSend');
-                        window._logSend('doPaste.SEND', text.substring(0, 40));
                         window.__wsSend(text);
                         flash('已粘贴');
-                    } else {
-                        console.log('[Hermes] doPaste SKIP: same text already sent');
-                        window._logSend('doPaste.SKIP_SAME', '');
                     }
                 }).catch(function(err) {
-                    console.log('[Hermes] clipboard.readText failed:', err);
-                    window._logSend('doPaste.FALLBACK', String(err));
                     showPasteArea();
                 });
             } else {
-                console.log('[Hermes] no clipboard API, showing paste area');
-                window._logSend('doPaste.NO_API', '');
                 showPasteArea();
             }
         }
@@ -502,7 +458,6 @@ INJECT_JS = """<script>
         // clipboard read → onData → sendFunction → ws.send.
         // We do NOT intercept paste events — let xterm.js handle everything.
         // For Chinese IME, xterm.js natively handles composition events.
-
         // Keyboard shortcuts
         document.addEventListener('keydown', function(e) {
             if (e.key === 'Enter' && (e.shiftKey || e.altKey)) {
@@ -538,10 +493,6 @@ INJECT_JS = """<script>
                 }
             });
         }
-        
-
-        
-        console.log('[Hermes] Button bindings initialized');
     }
 })();
 </script>"""
