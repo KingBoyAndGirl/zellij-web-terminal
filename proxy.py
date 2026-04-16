@@ -94,7 +94,6 @@ INJECT_WS_INTERCEPT = """<script>
     window._ctrlWs = null;  // Control WebSocket
     // IME composition guard (fix Win11 Chinese input doubling)
     window.__imeComposing = false;
-    window.__imeNativeSend = null; // set below per-terminal ws
     // Default session name, can be overridden by injected script
     window.sessionName = window.sessionName || 'default';
     
@@ -118,7 +117,6 @@ INJECT_WS_INTERCEPT = """<script>
             // Wrap ws.send with dedup to prevent double paste from
             // ClipboardAddon + any residual handlers (buttons, etc.)
             var _nativeSend = ws.send.bind(ws);
-            window.__imeNativeSend = _nativeSend; // expose for compositionend
             var _lastSent = {d: '', t: 0};
             ws.send = function(data) {
                 // Block all sends during IME composition
@@ -180,11 +178,8 @@ INJECT_WS_INTERCEPT = """<script>
     }, true);
     document.addEventListener('compositionend', function(e) {
         window.__imeComposing = false;
-        var finalText = e.data || '';
-        if (finalText.length > 0 && window.__imeNativeSend) {
-            // Send final composed text once via native send (bypass our wrapper)
-            window.__imeNativeSend(finalText);
-        }
+        // Do NOT send here — xterm.js CompositionHelper will fire onData
+        // with the final text. We only need to block intermediate sends.
     }, true);
     
 })();
