@@ -177,9 +177,15 @@ INJECT_WS_INTERCEPT = """<script>
         return false;
     };
     
-    // IME Composition event handlers (capture-phase)
-    // Strategy: let xterm.js handle composition naturally via its own handlers.
-    // We only track state for ws.send dedup — never bypass ws.send with _nativeSend.
+    // IME Composition event handlers
+    // CRITICAL: xterm.js's _finalizeComposition reads the textarea after a setTimeout(0)
+    // and sends via _coreService.triggerDataEvent → onData → sendFunction → ws.send.
+    // This bypasses our ws.send wrapper. We must:
+    // 1. Clear xterm.js's textarea on compositionend so it reads empty string
+    // 2. Block at the onData callback level as fallback
+    // 3. Stop propagation so xterm.js doesn't process the event at all
+    window.__imeLastSentText = '';
+    window.__imeSentTime = 0;
     document.addEventListener('compositionstart', function() {
         window.__imeComposing = true;
         console.log('[IME] compositionstart');
@@ -190,24 +196,29 @@ INJECT_WS_INTERCEPT = """<script>
     document.addEventListener('compositionend', function(e) {
         var finalText = e.data || '';
         console.log('[IME] compositionend, text:', finalText, 'hex:', Array.from(finalText).map(function(c){return 'U+'+c.charCodeAt(0).toString(16).padStart(4,'0')}).join(' '));
-        // We handle the send ourselves. Temporarily clear composing flag
-        // so our ws.send wrapper doesn't block our own send.
-        // Then restore it to block xterm.js's deferred handler.
+        // Stop xterm.js from seeing this event (prevent _finalizeComposition)
+        e.stopImmediatePropagation();
+        // Clear xterm.js's textarea so even if its setTimeout(0) fires, it reads nothing
+        var ta = document.querySelector('.xterm-helper-textarea');
+        if (ta) { ta.value = ''; console.log('[IME] textarea cleared'); }
+        // Send the composed text ourselves via ws.send
         if (finalText.length > 0) {
+            window.__imeLastSentText = finalText;
+            window.__imeSentTime = Date.now();
             window.__imeComposing = false;
             var ws = window._termWs;
             if (ws && ws.readyState === WebSocket.OPEN) {
                 ws.send(finalText);
                 console.log('[IME] SENT via ws.send:', Array.from(finalText).map(function(c){return 'U+'+c.charCodeAt(0).toString(16).padStart(4,'0')}).join(' '));
             }
-            window.__imeComposing = true;
         }
-        // Clear composing flag after xterm.js's setTimeout(0) has fired
+        // Clear composing flag after a safe delay (longer than xterm.js's setTimeout(0))
+        window.__imeComposing = false;
         clearTimeout(window.__imeClearTimer);
         window.__imeClearTimer = setTimeout(function() {
             window.__imeComposing = false;
             console.log('[IME] composing cleared');
-        }, 200);
+        }, 500);
     }, true);
     // NOTE: We do NOT block keydown events during composition.
     // Blocking keydown prevents xterm.js from calling _handleAnyTextareaChanges,
@@ -323,6 +334,34 @@ INJECT_JS = """<script>
     }, 100);
 
     function init() {
+        // IME OnData wrapper: intercept xterm.js's onData callbacks to block
+        // composed text that bypasses our ws.send wrapper.
+        // xterm.js's _finalizeComposition sends via _coreService.triggerDataEvent →
+        // onData → sendFunction(ws.send). We also track at the onData level.
+        (function() {
+            var origOnData = term.onData.bind(term);
+            term.onData = function(callback) {
+                return origOnData(function(data) {
+                    // Block composed text: if within 500ms of our compositionend send
+                    var elapsed = Date.now() - (window.__imeSentTime || 0);
+                    if (elapsed < 500 && data === window.__imeLastSentText) {
+                        console.log('[IME] onData BLOCK (duplicate):', data.substring(0, 20));
+                        return;
+                    }
+                    // Also block if composing flag is set
+                    if (window.__imeComposing) {
+                        console.log('[IME] onData BLOCK (composing):', data.substring(0, 20));
+                        return;
+                    }
+                    console.log('[IME] onData PASS:', data.substring(0, 20));
+                    callback(data);
+                });
+            };
+            // Re-register any existing onData callbacks with the new wrapper
+            // (the original callbacks are already registered, but new ones will go through us)
+            console.log('[IME] term.onData wrapper installed');
+        })();
+
         // Button mappings - ESC sequences
         var keyMap = {
             'btn-esc': '\\x1b',
