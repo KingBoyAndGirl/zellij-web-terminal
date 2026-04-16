@@ -375,18 +375,15 @@ INJECT_JS = """<script>
             };
         })();
 
-        // NUCLEAR OPTION: Monkey-patch _coreService.triggerDataEvent to intercept
-        // xterm.js's internal composition sending. This is the only path that
-        // bypasses ALL our wrappers (ws.send, __wsSend, term.onData).
-        // xterm.js calls: _finalizeComposition → triggerDataEvent(data) →
-        //   _onData.fire(data) → Zellij's sendFunction → ws.send
+        // COMPREHENSIVE: Intercept ALL xterm.js internal data paths
         (function() {
             var cs = term._core && term._core.coreService;
+            
+            // 1. Patch coreService.triggerDataEvent (if it exists)
             if (cs && cs.triggerDataEvent) {
                 var origTrigger = cs.triggerDataEvent.bind(cs);
                 cs.triggerDataEvent = function(data, wasUserInput) {
-                    console.log('[IME] triggerDataEvent called:', JSON.stringify(String(data).substring(0, 40)), 'justSent:', window.__imeJustSent);
-                    // If we just sent this via our compositionend handler, block
+                    console.log('[IME] triggerDataEvent called:', JSON.stringify(String(data).substring(0, 40)));
                     if (window.__imeJustSent && data === window.__imeJustSentText) {
                         console.log('[IME] BLOCKED triggerDataEvent duplicate');
                         window.__imeJustSent = false;
@@ -395,21 +392,47 @@ INJECT_JS = """<script>
                     }
                     return origTrigger(data, wasUserInput);
                 };
-                console.log('[IME] triggerDataEvent patched OK');
-            } else {
-                // Dump what we CAN find
-                var coreKeys = Object.keys(term._core || {});
-                console.log('[IME] triggerDataEvent NOT FOUND. _core keys:', coreKeys.join(', '));
-                // Check all _core properties for triggerDataEvent or similar
-                for (var i = 0; i < coreKeys.length; i++) {
-                    var val = term._core[coreKeys[i]];
-                    if (val && typeof val === 'object') {
-                        var subKeys = Object.keys(val);
-                        if (subKeys.indexOf('triggerDataEvent') >= 0 || subKeys.indexOf('_onData') >= 0) {
-                            console.log('[IME] Found in _core.' + coreKeys[i] + ':', subKeys.join(', '));
-                        }
-                    }
+                console.log('[IME] triggerDataEvent patched');
+            }
+            
+            // 2. Patch _onData event emitter (the actual event bus)
+            var coreKeys = Object.keys(term._core || {});
+            for (var i = 0; i < coreKeys.length; i++) {
+                var obj = term._core[coreKeys[i]];
+                if (obj && obj._onData && typeof obj._onData.fire === 'function') {
+                    (function(key, emitter) {
+                        var origFire = emitter.fire.bind(emitter);
+                        emitter.fire = function(data) {
+                            console.log('[IME] _onData.fire via _core.' + key + ':', JSON.stringify(String(data).substring(0, 40)));
+                            if (window.__imeJustSent && data === window.__imeJustSentText) {
+                                console.log('[IME] BLOCKED _onData.fire duplicate');
+                                window.__imeJustSent = false;
+                                window.__imeJustSentText = '';
+                                return;
+                            }
+                            return origFire(data);
+                        };
+                        console.log('[IME] _onData.fire patched via _core.' + key);
+                    })(coreKeys[i], obj);
                 }
+            }
+            
+            // 3. Patch term.onData to intercept registered callbacks
+            if (term._core && term._core._onData && typeof term._core._onData.fire === 'function') {
+                var origCoreFire = term._core._onData.fire.bind(term._core._onData);
+                term._core._onData.fire = function(data) {
+                    console.log('[IME] _core._onData.fire:', JSON.stringify(String(data).substring(0, 40)));
+                    if (window.__imeJustSent && data === window.__imeJustSentText) {
+                        console.log('[IME] BLOCKED _core._onData.fire duplicate');
+                        window.__imeJustSent = false;
+                        window.__imeJustSentText = '';
+                        return;
+                    }
+                    return origCoreFire(data);
+                };
+                console.log('[IME] _core._onData.fire patched');
+            } else {
+                console.log('[IME] _core._onData NOT FOUND');
             }
         })();
 
