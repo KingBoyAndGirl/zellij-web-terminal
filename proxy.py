@@ -447,7 +447,7 @@ INJECT_JS = """<script>
                             return origFire(data);
                         };
                         console.log('[IME] _onData.fire patched via _core.' + key);
-                    })(coreKeys[i], obj);
+                    })(coreKeys[i], obj._onData);
                 }
             }
             
