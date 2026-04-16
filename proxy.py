@@ -190,15 +190,17 @@ INJECT_WS_INTERCEPT = """<script>
     document.addEventListener('compositionend', function(e) {
         var finalText = e.data || '';
         console.log('[IME] compositionend, text:', finalText, 'hex:', Array.from(finalText).map(function(c){return 'U+'+c.charCodeAt(0).toString(16).padStart(4,'0')}).join(' '));
-        // DON'T clear __imeComposing yet — keep it true to block xterm.js's
-        // deferred handler (setTimeout 0 → _handleAnyTextareaChanges → onData → ws.send).
-        // We handle the send ourselves:
+        // We handle the send ourselves. Temporarily clear composing flag
+        // so our ws.send wrapper doesn't block our own send.
+        // Then restore it to block xterm.js's deferred handler.
         if (finalText.length > 0) {
+            window.__imeComposing = false;
             var ws = window._termWs;
             if (ws && ws.readyState === WebSocket.OPEN) {
                 ws.send(finalText);
                 console.log('[IME] SENT via ws.send:', Array.from(finalText).map(function(c){return 'U+'+c.charCodeAt(0).toString(16).padStart(4,'0')}).join(' '));
             }
+            window.__imeComposing = true;
         }
         // Clear composing flag after xterm.js's setTimeout(0) has fired
         clearTimeout(window.__imeClearTimer);
