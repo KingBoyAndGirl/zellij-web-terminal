@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Zellij 终端</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { background: #000; overflow: hidden; display: flex; flex-direction: column; height: 100dvh; }
+        
+        /* 终端区域 */
+        #terminal-frame {
+            flex: 1;
+            width: 100%;
+            border: none;
+            background: #000;
+        }
+        
+        /* 快捷按钮栏 */
+        #toolbar {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 4px;
+            padding: 6px 8px;
+            background: #1a1a1a;
+            border-top: 1px solid #333;
+            min-height: 44px;
+        }
+        
+        .btn {
+            flex: 1;
+            min-width: 44px;
+            height: 40px;
+            border: 1px solid #444;
+            border-radius: 6px;
+            background: #2a2a2a;
+            color: #e0e0e0;
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            user-select: none;
+            -webkit-tap-highlight-color: transparent;
+            transition: background 0.1s;
+        }
+        
+        .btn:active { background: #444; }
+        
+        .btn.primary { background: #61afef; border-color: #61afef; color: #1a1a1a; }
+        .btn.primary:active { background: #4a9de0; }
+        
+        .btn.danger { background: #e06c75; border-color: #e06c75; color: #1a1a1a; }
+        .btn.danger:active { background: #c95a63; }
+        
+        .btn.accent { background: #98c379; border-color: #98c379; color: #1a1a1a; }
+        .btn.accent:active { background: #7db360; }
+        
+        .btn.wide { flex: 2; }
+        
+        /* 功能键行 */
+        #fkeys {
+            display: flex;
+            gap: 4px;
+            padding: 4px 8px;
+            background: #151515;
+            border-top: 1px solid #333;
+        }
+        
+        .fbtn {
+            flex: 1;
+            height: 32px;
+            border: 1px solid #333;
+            border-radius: 4px;
+            background: #222;
+            color: #aaa;
+            font-size: 11px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-scale: 1;
+            justify-content: center;
+            user-select: none;
+            -webkit-tap-highlight-color: transparent;
+        }
+        
+        .fbtn:active { background: #444; color: #fff; }
+        
+        /* 弹出菜单 */
+        #menu-overlay {
+            display: none;
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0,0,0,0.7);
+            z-index: 100;
+        }
+        
+        #menu {
+            position: absolute;
+            bottom: 0; left: 0; right: 0;
+            background: #1a1a1a;
+            border-radius: 16px 16px 0 0;
+            padding: 16px;
+            max-height: 60vh;
+            overflow-y: auto;
+        }
+        
+        .menu-title {
+            color: #888;
+            font-size: 12px;
+            text-transform: uppercase;
+            margin-bottom: 8px;
+            padding-left: 4px;
+        }
+        
+        .menu-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 6px;
+            margin-bottom: 12px;
+        }
+        
+        .menu-btn {
+            height: 44px;
+            border: 1px solid #333;
+            border-radius: 8px;
+            background: #2a2a2a;
+            color: #e0e0e0;
+            font-size: 13px;
+            cursor: pointer;
+        }
+        
+        .menu-btn:active { background: #444; }
+    </style>
+</head>
+<body>
+    <!-- 终端 iframe -->
+    <iframe id="terminal-frame" src="/shared" allow="clipboard-read; clipboard-write"></iframe>
+    
+    <!-- 功能键行 -->
+    <div id="fkeys">
+        <button class="fbtn" onclick="sendKey('Escape')">ESC</button>
+        <button class="fbtn" onclick="sendKey('Tab')">TAB</button>
+        <button class="fbtn" onclick="sendCtrlKey('c')">^C</button>
+        <button class="fbtn" onclick="sendCtrlKey('l')">^L</button>
+        <button class="fbtn" onclick="sendCtrlKey('d')">^D</button>
+        <button class="fbtn" onclick="sendKey('ArrowUp')">↑</button>
+        <button class="fbtn" onclick="sendKey('ArrowDown')">↓</button>
+        <button class="fbtn" onclick="sendKey('ArrowLeft')">←</button>
+        <button class="fbtn" onclick="sendKey('ArrowRight')">→</button>
+        <button class="fbtn" onclick="showMenu()">⋯</button>
+    </div>
+    
+    <!-- 主按钮栏 -->
+    <div id="toolbar">
+        <button class="btn primary" onclick="sendKeys('Alt','n')">新Tab</button>
+        <button class="btn" onclick="sendKeys('Alt','x')">关闭</button>
+        <button class="btn" onclick="sendKeys('Alt','h')">分屏</button>
+        <button class="btn" onclick="sendKeys('Alt','f')">全屏</button>
+        <button class="btn accent" onclick="sendKeys('Alt','d')">断开</button>
+        <button class="btn danger" onclick="sendKeys('Alt','q')">退出</button>
+    </div>
+    
+    <!-- 更多操作弹出菜单 -->
+    <div id="menu-overlay" onclick="hideMenu()">
+        <div id="menu" onclick="event.stopPropagation()">
+            <div class="menu-title">Zellij 模式</div>
+            <div class="menu-grid">
+                <button class="menu-btn" onclick="switchMode('pane')">窗格</button>
+                <button class="menu-btn" onclick="switchMode('tab')">标签</button>
+                <button class="menu-btn" onclick="switchMode('resize')">缩放</button>
+                <button class="menu-btn" onclick="switchMode('move')">移动</button>
+                <button class="menu-btn" onclick="switchMode('session')">会话</button>
+                <button class="menu-btn" onclick="switchMode('scroll')">滚动</button>
+            </div>
+            
+            <div class="menu-title">窗格操作</div>
+            <div class="menu-grid">
+                <button class="menu-btn" onclick="sendPaneCmd('n')">新窗格↓</button>
+                <button class="menu-btn" onclick="sendPaneCmd('l')">新窗格→</button>
+                <button class="menu-btn" onclick="sendPaneCmd('x')">关闭窗格</button>
+                <button class="menu-btn" onclick="sendPaneCmd('f')">全屏窗格</button>
+            </div>
+            
+            <div class="menu-title">标签切换</div>
+            <div class="menu-grid">
+                <button class="menu-btn" onclick="goTab(1)">Tab 1</button>
+                <button class="menu-btn" onclick="goTab(2)">Tab 2</button>
+                <button class="menu-btn" onclick="goTab(3)">Tab 3</button>
+                <button class="menu-btn" onclick="goTab(4)">Tab 4</button>
+                <button class="menu-btn" onclick="goTab(5)">Tab 5</button>
+                <button class="menu-btn" onclick="goTab(6)">Tab 6</button>
+            </div>
+            
+            <div class="menu-title">工具</div>
+            <div class="menu-grid">
+                <button class="menu-btn" onclick="sendText('clear\n')">清屏</button>
+                <button class="menu-btn" onclick="sendText('cd ~\n')">回家</button>
+                <button class="menu-btn" onclick="hideMenu()">关闭</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const frame = document.getElementById('terminal-frame');
+        
+        // 获取 iframe 里的 terminal 对象
+        function getTerm() {
+            try {
+                return frame.contentWindow.term || null;
+            } catch(e) { return null; }
+        }
+        
+        // 发送按键到终端
+        function sendKey(key) {
+            const term = getTerm();
+            if (term) {
+                term._core._inputHandler ? null : null;
+                // 通过 xterm.js 的 onKey 触发
+                const event = new KeyboardEvent('keydown', { key, bubbles: true });
+                frame.contentDocument.dispatchEvent(event);
+            }
+        }
+        
+        function sendCtrlKey(key) {
+            const term = getTerm();
+            if (term) {
+                const ctrlChar = String.fromCharCode(key.toUpperCase().charCodeAt(0) - 64);
+                term._core._coreService.triggerDataEvent(ctrlChar, true);
+            }
+        }
+        
+        function sendKeys(mod, key) {
+            // Alt 组合键
+            const altMap = {
+                'n': '\x1bn', 'x': '\x1bx', 'h': '\x1bh', 'v': '\x1bv',
+                'f': '\x1bf', 'd': '\x1bd', 'q': '\x1bq',
+                '1': '\x1b1', '2': '\x1b2', '3': '\x1b3', '4': '\x1b4', '5': '\x1b5',
+                'Tab': '\x1b[9;3~'
+            };
+            const term = getTerm();
+            if (term && altMap[key]) {
+                term._core._coreService.triggerDataEvent(altMap[key], true);
+            }
+        }
+        
+        function sendText(text) {
+            const term = getTerm();
+            if (term) {
+                term._core._coreService.triggerDataEvent(text, true);
+            }
+            hideMenu();
+        }
+        
+        function switchMode(mode) {
+            // Ctrl+p 进入 Zellij 前缀，然后切换模式
+            const term = getTerm();
+            if (term) {
+                term._core._coreService.triggerDataEvent('\x10', true); // Ctrl+P
+                setTimeout(() => {
+                    term._core._coreService.triggerDataEvent(mode[0], true);
+                }, 50);
+            }
+            hideMenu();
+        }
+        
+        function sendPaneCmd(cmd) {
+            switchMode('pane');
+            setTimeout(() => {
+                const term = getTerm();
+                if (term) term._core._coreService.triggerDataEvent(cmd, true);
+            }, 100);
+            hideMenu();
+        }
+        
+        function goTab(n) {
+            sendKeys('Alt', String(n));
+            hideMenu();
+        }
+        
+        function showMenu() {
+            document.getElementById('menu-overlay').style.display = 'block';
+        }
+        
+        function hideMenu() {
+            document.getElementById('menu-overlay').style.display = 'none';
+        }
+        
+        // 防止双击缩放
+        document.addEventListener('dblclick', e => e.preventDefault());
+        
+        // 键盘显示时自动调整
+        if (window.visualViewport) {
+            window.visualViewport.addEventListener('resize', () => {
+                document.body.style.height = window.visualViewport.height + 'px';
+            });
+        }
+    </script>
+</body>
+</html>

@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Zellij Terminal</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { background: #000; overflow: hidden; height: 100vh; height: 100dvh; }
+        #term-wrap {
+            position: absolute;
+            top: 0; left: 0; right: 0;
+            bottom: 90px;
+            background: #000;
+        }
+        #term-frame {
+            width: 100%;
+            height: 100%;
+            border: none;
+            background: #000;
+        }
+        #toolbar {
+            position: fixed;
+            bottom: 0; left: 0; right: 0;
+            background: #111;
+            border-top: 1px solid #333;
+            padding: 4px 4px env(safe-area-inset-bottom, 4px);
+            z-index: 999;
+        }
+        .row { display: flex; gap: 3px; margin-bottom: 3px; }
+        .row:last-child { margin-bottom: 0; }
+        .btn {
+            flex: 1; height: 36px; min-width: 0;
+            border: 1px solid #444; border-radius: 5px;
+            background: #222; color: #ddd;
+            font-size: 13px; font-weight: 500;
+            cursor: pointer;
+            display: flex; align-items: center; justify-content: center;
+            user-select: none; -webkit-user-select: none;
+            -webkit-tap-highlight-color: transparent;
+        }
+        .btn:active { background: #555; color: #fff; }
+        .btn.bl { background: #1a3a5c; border-color: #61afef; color: #61afef; }
+        .btn.gn { background: #1a3a1a; border-color: #98c379; color: #98c379; }
+        .btn.rd { background: #3a1a1a; border-color: #e06c75; color: #e06c75; }
+        .btn.yl { background: #3a3a1a; border-color: #e5c07b; color: #e5c07b; }
+        .btn.pk { background: #3a1a3a; border-color: #c678dd; color: #c678dd; }
+        .panel {
+            display: none;
+            position: fixed;
+            bottom: 90px; left: 0; right: 0;
+            background: #111; border-top: 1px solid #333;
+            padding: 8px; z-index: 998;
+            max-height: 50vh; overflow-y: auto;
+        }
+        .panel.open { display: block; }
+        .panel-title { color: #666; font-size: 11px; margin-bottom: 4px; padding-left: 2px; }
+        html { touch-action: manipulation; }
+    </style>
+</head>
+<body>
+    <div id="term-wrap">
+        <iframe id="term-frame" src="/shared" allow="clipboard-read; clipboard-write; fullscreen"></iframe>
+    </div>
+
+    <div class="panel" id="panel-edit">
+        <div class="panel-title">编辑</div>
+        <div class="row">
+            <button class="btn" onpointerdown="tap('\t')">TAB</button>
+            <button class="btn" onpointerdown="tapKey('Backspace')">⌫</button>
+            <button class="btn" onpointerdown="tapKey('Delete')">⌦</button>
+            <button class="btn" onpointerdown="tapKey('Home')">↖</button>
+            <button class="btn" onpointerdown="tapKey('End')">↘</button>
+        </div>
+        <div class="row">
+            <button class="btn bl" onpointerdown="doCopy()">📋 复制</button>
+            <button class="btn bl" onpointerdown="doPaste()">📌 粘贴</button>
+        </div>
+        <div class="row">
+            <button class="btn" onpointerdown="tap('\x01')">^A 行首</button>
+            <button class="btn" onpointerdown="tap('\x05')">^E 行尾</button>
+            <button class="btn" onpointerdown="tap('\x15')">^U 删行</button>
+            <button class="btn" onpointerdown="tap('\x0b')">^K 删尾</button>
+            <button class="btn" onpointerdown="tap('\x17')">^W 删词</button>
+        </div>
+    </div>
+
+    <div class="panel" id="panel-zellij">
+        <div class="panel-title">Zellij 操作</div>
+        <div class="row">
+            <button class="btn bl" onpointerdown="tap('\x1bn')">新Tab</button>
+            <button class="btn rd" onpointerdown="tap('\x1bx')">关闭</button>
+            <button class="btn" onpointerdown="tap('\x1bh')">←分屏</button>
+            <button class="btn" onpointerdown="tap('\x1bv')">↓分屏</button>
+            <button class="btn yl" onpointerdown="tap('\x1bf')">全屏</button>
+        </div>
+        <div class="row">
+            <button class="btn gn" onpointerdown="tap('\x1bd')">断开</button>
+            <button class="btn rd" onpointerdown="tap('\x1bq')">退出</button>
+        </div>
+        <div class="panel-title">Tab 切换</div>
+        <div class="row">
+            <button class="btn" onpointerdown="tap('\x1b1')">Tab1</button>
+            <button class="btn" onpointerdown="tap('\x1b2')">Tab2</button>
+            <button class="btn" onpointerdown="tap('\x1b3')">Tab3</button>
+            <button class="btn" onpointerdown="tap('\x1b4')">Tab4</button>
+            <button class="btn" onpointerdown="tap('\x1b5')">Tab5</button>
+        </div>
+        <div class="panel-title">工具</div>
+        <div class="row">
+            <button class="btn" onpointerdown="tap('clear\n')">清屏</button>
+            <button class="btn" onpointerdown="tap('cd ~\n')">回家</button>
+            <button class="btn" onpointerdown="tap('history | tail -20\n')">历史</button>
+        </div>
+    </div>
+
+    <div id="toolbar">
+        <div class="row">
+            <button class="btn" onpointerdown="tapKey('Escape')">ESC</button>
+            <button class="btn" onpointerdown="tap('\r')">↵ Enter</button>
+            <button class="btn" onpointerdown="tap('\n')">↩ 换行</button>
+            <button class="btn bl" onclick="togglePanel('panel-edit')">编辑</button>
+            <button class="btn pk" onclick="togglePanel('panel-zellij')">操作</button>
+        </div>
+        <div class="row">
+            <button class="btn" onpointerdown="tapKey('ArrowUp')">↑</button>
+            <button class="btn" onpointerdown="tapKey('ArrowDown')">↓</button>
+            <button class="btn" onpointerdown="tapKey('ArrowLeft')">←</button>
+            <button class="btn" onpointerdown="tapKey('ArrowRight')">→</button>
+            <button class="btn gn" onpointerdown="doPaste()">粘贴</button>
+            <button class="btn rd" onpointerdown="tap('\x03')">^C</button>
+        </div>
+    </div>
+
+    <script>
+        const frame = document.getElementById('term-frame');
+        let termInstance = null;
+
+        // 获取终端实例
+        function getTerm() {
+            if (termInstance) return termInstance;
+            try {
+                termInstance = frame.contentWindow.term;
+            } catch (e) {}
+            return termInstance;
+        }
+
+        // 通过 postMessage 发送数据到 iframe
+        function tap(data) {
+            const term = getTerm();
+            if (term && term.write) {
+                term.write(data);
+                return;
+            }
+            frame.contentWindow.postMessage({ type: 'sendTerm', data: data }, '*');
+        }
+
+        function tapKey(key) {
+            const term = getTerm();
+            if (term && term.keyDown) {
+                // 模拟按键事件
+                term.keyDown({ key: key, preventDefault: () => {} });
+                return;
+            }
+            frame.contentWindow.postMessage({ type: 'sendKey', key: key }, '*');
+        }
+
+        async function doCopy() {
+            try {
+                const doc = frame.contentDocument;
+                const term = frame.contentWindow.term;
+                if (term && term.hasSelection()) {
+                    await navigator.clipboard.writeText(term.getSelection());
+                    flash('已复制 ✓');
+                } else {
+                    flash('请先选中文本');
+                }
+            } catch (e) { flash('复制失败'); }
+        }
+
+        async function doPaste() {
+            try {
+                const text = await navigator.clipboard.readText();
+                if (text) tap(text);
+            } catch (e) { flash('请允许剪贴板权限'); }
+        }
+
+        let openPanel = null;
+        function togglePanel(id) {
+            const panel = document.getElementById(id);
+            if (openPanel && openPanel !== panel) openPanel.classList.remove('open');
+            panel.classList.toggle('open');
+            openPanel = panel.classList.contains('open') ? panel : null;
+        }
+
+        function flash(msg) {
+            const el = document.createElement('div');
+            el.textContent = msg;
+            el.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:#333;color:#fff;padding:12px 24px;border-radius:8px;font-size:16px;z-index:9999;pointer-events:none;';
+            document.body.appendChild(el);
+            setTimeout(() => el.remove(), 1000);
+        }
+
+        // PC 快捷键
+        document.addEventListener('keydown', function(e) {
+            if (e.key === 'Enter' && (e.shiftKey || e.altKey)) {
+                e.preventDefault();
+                tap('\n');
+                return;
+            }
+            if (e.key === 'C' && e.ctrlKey && e.shiftKey) {
+                e.preventDefault();
+                doCopy();
+                return;
+            }
+            if (e.key === 'V' && e.ctrlKey && e.shiftKey) {
+                e.preventDefault();
+                doPaste();
+                return;
+            }
+        });
+
+        document.addEventListener('dblclick', e => e.preventDefault());
+        if (window.visualViewport) {
+            window.visualViewport.addEventListener('resize', () => {
+                document.getElementById('term-wrap').style.height =
+                    (window.visualViewport.height - 90) + 'px';
+            });
+        }
+    </script>
+</body>
+</html>
