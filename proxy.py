@@ -323,6 +323,15 @@ INJECT_JS = """<script>
             init();
         }
     }, 100);
+    // Fallback: after 5s, init anyway even if CompositionHelper not found
+    setTimeout(function() {
+        if (!term && window.term) {
+            clearInterval(checkInterval);
+            term = window.term;
+            console.log('[IME] CompositionHelper not found within 5s, init fallback');
+            init();
+        }
+    }, 5000);
 
     function init() {
         // CRITICAL: Disable xterm.js's CompositionHelper
