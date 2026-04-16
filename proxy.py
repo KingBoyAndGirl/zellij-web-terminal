@@ -194,9 +194,25 @@ INJECT_WS_INTERCEPT = """<script>
         console.log('[IME] compositionstart');
     }, true);
     document.addEventListener('compositionend', function(e) {
-        console.log('[IME] compositionend, text:', e.data || '');
+        var finalText = e.data || '';
+        // Also read textarea in case e.data is empty
+        var ta = document.querySelector('.xterm-helper-textarea');
+        if (!finalText && ta && ta.value) {
+            finalText = ta.value;
+        }
+        console.log('[IME] compositionend, text:', finalText);
+        if (finalText.length > 0) {
+            window.__imeComposing = false;
+            var ws = window._termWs;
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(finalText);
+                console.log('[IME] SENT via ws.send:', Array.from(finalText).map(function(c){return 'U+'+c.charCodeAt(0).toString(16).padStart(4,'0')}).join(' '));
+            }
+        }
+        // Clear textarea to prevent any residual reads
+        if (ta) { ta.value = ''; }
         window.__imeComposing = false;
-        console.log('[IME] composing cleared (xterm.js will send naturally)');
+        console.log('[IME] composing cleared');
     }, true);
     
 })();
@@ -309,6 +325,27 @@ INJECT_JS = """<script>
     }, 100);
 
     function init() {
+        // CRITICAL: Disable xterm.js's CompositionHelper entirely
+        // It registers capture-phase handlers on the textarea that run BEFORE our
+        // document-level handlers, causing it to read textarea and write to buffer
+        // before we can intercept. We dispose it and handle IME ourselves.
+        (function() {
+            var ch = term._core && term._core._compositionHelper;
+            if (ch && ch.dispose) {
+                ch.dispose();
+                console.log('[IME] xterm.js CompositionHelper DISPOSED');
+            } else {
+                console.log('[IME] WARNING: CompositionHelper not found');
+            }
+            // Also remove the textarea's composition handlers by replacing it
+            var ta = document.querySelector('.xterm-helper-textarea');
+            if (ta) {
+                var newTa = ta.cloneNode(false);
+                ta.parentNode.replaceChild(newTa, ta);
+                console.log('[IME] textarea replaced (handlers cleared)');
+            }
+        })();
+
         // term.write interceptor: log and dedup IME renders
         (function() {
             var origWrite = term.write.bind(term);
