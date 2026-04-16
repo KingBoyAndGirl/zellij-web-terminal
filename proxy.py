@@ -92,6 +92,9 @@ INJECT_WS_INTERCEPT = """<script>
     var OriginalWebSocket = window.WebSocket;
     window._termWs = null;  // Terminal WebSocket
     window._ctrlWs = null;  // Control WebSocket
+    // IME composition guard (fix Win11 Chinese input doubling)
+    window.__imeComposing = false;
+    window.__imeNativeSend = null; // set below per-terminal ws
     // Default session name, can be overridden by injected script
     window.sessionName = window.sessionName || 'default';
     
@@ -115,8 +118,13 @@ INJECT_WS_INTERCEPT = """<script>
             // Wrap ws.send with dedup to prevent double paste from
             // ClipboardAddon + any residual handlers (buttons, etc.)
             var _nativeSend = ws.send.bind(ws);
+            window.__imeNativeSend = _nativeSend; // expose for compositionend
             var _lastSent = {d: '', t: 0};
             ws.send = function(data) {
+                // Block all sends during IME composition
+                if (window.__imeComposing) {
+                    return;
+                }
                 var now = Date.now();
                 if (typeof data === 'string' && data.length > 0 && data.length < 10000) {
                     if (_lastSent.d === data && (now - _lastSent.t) < 200) {
@@ -143,6 +151,10 @@ INJECT_WS_INTERCEPT = """<script>
     // Dedup state for __wsSend
     window.__wsLast = {d: '', t: 0};
     window.__wsSend = function(data) {
+        // Block during IME composition
+        if (window.__imeComposing) {
+            return true;
+        }
         var ws = window._termWs;
         if (ws && ws.readyState === WebSocket.OPEN) {
             // Deduplicate: drop exact same data within 200ms
@@ -158,6 +170,22 @@ INJECT_WS_INTERCEPT = """<script>
         }
         return false;
     };
+    
+    // IME Composition event handlers (capture-phase, fires before xterm.js)
+    document.addEventListener('compositionstart', function() {
+        window.__imeComposing = true;
+    }, true);
+    document.addEventListener('compositionupdate', function() {
+        // intermediate state — ws.send is already blocked
+    }, true);
+    document.addEventListener('compositionend', function(e) {
+        window.__imeComposing = false;
+        var finalText = e.data || '';
+        if (finalText.length > 0 && window.__imeNativeSend) {
+            // Send final composed text once via native send (bypass our wrapper)
+            window.__imeNativeSend(finalText);
+        }
+    }, true);
     
 })();
 </script>"""
