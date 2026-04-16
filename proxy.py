@@ -117,26 +117,31 @@ INJECT_WS_INTERCEPT = """<script>
             // Wrap ws.send with dedup to prevent double paste from
             // ClipboardAddon + any residual handlers (buttons, etc.)
             var _nativeSend = ws.send.bind(ws);
-            window.__imeNativeSend = _nativeSend;
             var _lastSent = {d: '', t: 0};
             ws.send = function(data) {
+                var _hex = typeof data === 'string' ? Array.from(data).map(function(c){return 'U+'+c.charCodeAt(0).toString(16).padStart(4,'0')}).join(' ') : String(data);
+                console.log('[IME] ws.send called, composing:', window.__imeComposing, 'blockUntil:', window.__imeBlockUntil, 'hex:', _hex, 'len:', data.length);
                 // Block all sends during IME composition
                 if (window.__imeComposing) {
+                    console.log('[IME] ws.send BLOCK composing');
                     return;
                 }
                 // Post-composition dedup: block same text within 500ms after compositionend
                 if (window.__imeBlockUntil && Date.now() < window.__imeBlockUntil) {
                     if (typeof data === 'string' && data === window.__imeBlockText) {
+                        console.log('[IME] ws.send BLOCK post-dedup:', _hex);
                         return;
                     }
                 }
                 var now = Date.now();
                 if (typeof data === 'string' && data.length > 0 && data.length < 10000) {
-                    if (_lastSent.d === data && (now - _lastSent.t) < 200) {
+                    if (_lastSent.d === data && (now - _lastSent.t) < 1000) {
+                        console.log('[IME] ws.send BLOCK dedup1000:', _hex);
                         return;
                     }
                     _lastSent = {d: data, t: now};
                 }
+                console.log('[IME] ws.send ACTUAL SEND:', _hex);
                 _nativeSend(data);
             };
         } else if (url.indexOf('/ws/control') > -1) {
@@ -156,54 +161,102 @@ INJECT_WS_INTERCEPT = """<script>
     // Dedup state for __wsSend
     window.__wsLast = {d: '', t: 0};
     window.__wsSend = function(data) {
+        var _d = typeof data === 'string' ? data.substring(0,40) : String(data).substring(0,40);
         // Block during IME composition
         if (window.__imeComposing) {
+            console.log('[IME] __wsSend BLOCK composing:', _d);
             return true;
+        }
+        // Post-composition dedup
+        if (window.__imeBlockUntil && Date.now() < window.__imeBlockUntil) {
+            if (typeof data === 'string' && data === window.__imeBlockText) {
+                console.log('[IME] __wsSend BLOCK post-dedup:', _d);
+                return true;
+            }
         }
         var ws = window._termWs;
         if (ws && ws.readyState === WebSocket.OPEN) {
-            // Deduplicate: drop exact same data within 200ms
             var now = Date.now();
             if (typeof data === 'string' && data.length > 0 && data.length < 10000) {
-                if (window.__wsLast.d === data && (now - window.__wsLast.t) < 200) {
+                if (window.__wsLast.d === data && (now - window.__wsLast.t) < 1000) {
+                    console.log('[IME] __wsSend BLOCK dedup1000:', _d);
                     return true;
                 }
                 window.__wsLast = {d: data, t: now};
             }
+            console.log('[IME] __wsSend SEND:', _d);
             ws.send(data);
             return true;
         }
         return false;
     };
     
-    // IME Composition event handlers (capture-phase, fires before xterm.js)
+    // IME Composition event handlers (capture-phase)
+    // Strategy: let xterm.js handle composition naturally via its own handlers.
+    // We only track state for ws.send dedup — never bypass ws.send with _nativeSend.
     document.addEventListener('compositionstart', function() {
         window.__imeComposing = true;
+        console.log('[IME] compositionstart');
     }, true);
     document.addEventListener('compositionupdate', function(e) {
-        // intermediate state — ws.send is already blocked
+        console.log('[IME] compositionupdate:', e.data);
     }, true);
     document.addEventListener('compositionend', function(e) {
         var finalText = e.data || '';
-        if (finalText.length > 0 && window.__imeNativeSend) {
-            // Send final composed text via raw WebSocket (bypasses our wrapper)
-            window.__imeNativeSend(finalText);
-            // Sync dedup state so the wrapper can block xterm.js deferred handler
+        console.log('[IME] compositionend, text:', finalText, 'hex:', Array.from(finalText).map(function(c){return 'U+'+c.charCodeAt(0).toString(16).padStart(4,'0')}).join(' '));
+        // Mark composition done immediately so xterm.js can process normally
+        window.__imeComposing = false;
+        // Store text for dedup: xterm.js will send the same text via setTimeout(0)
+        // through onData → sendFunction → ws.send. Our ws.send wrapper catches it.
+        if (finalText.length > 0) {
             window.__imeBlockText = finalText;
-            window.__imeBlockUntil = Date.now() + 500;
-        }
-        // Clear flag after 500ms — catches xterm.js deferred handlers
-        setTimeout(function() {
-            window.__imeComposing = false;
-        }, 500);
-    }, true);
-    // Block keyboard events during composition (stops xterm.js keydown handler)
-    document.addEventListener('keydown', function(e) {
-        if (window.__imeComposing) {
-            e.stopImmediatePropagation();
-            e.preventDefault();
+            window.__imeBlockUntil = Date.now() + 2000;
         }
     }, true);
+    // NOTE: We do NOT block keydown events during composition.
+    // Blocking keydown prevents xterm.js from calling _handleAnyTextareaChanges,
+    // which is needed for proper composition finalization.
+    
+    // Prototype-level interception: catches ALL ws.send calls including
+    // those that bypass our instance wrapper (e.g. WebSocket.prototype.send.call)
+    // Also captures the xterm.js WebSocket reference and overrides send on the instance.
+    (function() {
+        var _origProtoSend = WebSocket.prototype.send;
+        var _origWebSocket = WebSocket;
+        WebSocket = function(url) {
+            var ws = new _origWebSocket(url);
+            // Capture the first WebSocket created as our terminal connection
+            if (!window._termWs) {
+                window._termWs = ws;
+                // Override send on the INSTANCE (shadows prototype)
+                var _wsOrigSend = ws.send.bind(ws);
+                ws.send = function(data) {
+                    // Block during composition
+                    if (window.__imeComposing) {
+                        return;
+                    }
+                    // Post-composition dedup
+                    if (window.__imeBlockUntil && Date.now() < window.__imeBlockUntil) {
+                        if (typeof data === 'string' && data === window.__imeBlockText) {
+                            return;
+                        }
+                    }
+                    return _wsOrigSend(data);
+                };
+            }
+            return ws;
+        };
+        WebSocket.prototype = _origWebSocket.prototype;
+        // Keep prototype-level as fallback for non-intercepted instances
+        WebSocket.prototype.send = function(data) {
+            if (this === window._termWs) {
+                // Delegated to instance-level wrapper (line ~122)
+                return _origProtoSend.call(this, data);
+            }
+            // Other WebSocket instances — pass through
+            return _origProtoSend.call(this, data);
+        };
+    })();
     
 })();
 </script>"""
@@ -941,11 +994,26 @@ async def proxy_http(reader, writer, headers, raw_header):
                 rh[k.strip().lower()] = v.strip()
 
         body_parts = []
-        while True:
-            chunk = await asyncio.wait_for(zr.read(65536), timeout=30)
-            if not chunk:
-                break
-            body_parts.append(chunk)
+        content_length = int(rh.get("content-length", 0))
+        if content_length > 0:
+            # Read exactly content_length bytes
+            remaining = content_length
+            while remaining > 0:
+                chunk = await asyncio.wait_for(zr.read(min(remaining, 65536)), timeout=15)
+                if not chunk:
+                    break
+                body_parts.append(chunk)
+                remaining -= len(chunk)
+        else:
+            # No content-length: read until timeout (short)
+            try:
+                while True:
+                    chunk = await asyncio.wait_for(zr.read(65536), timeout=2)
+                    if not chunk:
+                        break
+                    body_parts.append(chunk)
+            except asyncio.TimeoutError:
+                pass
         body_bytes = b"".join(body_parts)
         # Inject fix for HTML pages
         is_html = "text/html" in rh.get("content-type", "")
@@ -973,6 +1041,9 @@ async def proxy_http(reader, writer, headers, raw_header):
         zw.close()
 
     except Exception as e:
+        import traceback
+        print(f"[PROXY] asset error: {e}", flush=True)
+        traceback.print_exc()
         msg = f"Error: {e}"
         writer.write(
             f"HTTP/1.1 502 Bad Gateway\r\n"
