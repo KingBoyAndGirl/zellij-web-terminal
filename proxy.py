@@ -237,7 +237,7 @@ INJECT_HTML = """<div id="toolbar">
         <button id="ml-send" style="flex:1;background:#98c379;color:#111;border:none;border-radius:5px;padding:6px;font-size:13px;font-weight:600;cursor:pointer;">发送</button>
         <button id="ml-cancel" style="width:50px;background:#555;color:#ddd;border:none;border-radius:5px;padding:6px;font-size:13px;cursor:pointer;">取消</button>
     </div>
-    <textarea id="ml-input" style="width:100%;height:80px;background:#111;color:#ddd;border:1px solid #444;border-radius:5px;padding:8px;font-family:monospace;font-size:13px;resize:vertical;outline:none;box-sizing:border-box;" placeholder="输入多行命令，每行一条..."></textarea>
+    <textarea id="ml-input" style="width:100%;height:80px;background:#111;color:#ddd;border:1px solid #444;border-radius:5px;padding:8px;font-family:monospace;font-size:13px;resize:vertical;outline:none;box-sizing:border-box;" placeholder="粘贴或输入多行文本，发送作为一条命令输入"></textarea>
 </div>"""
 
 # JavaScript to inject (button bindings and other logic)
@@ -485,11 +485,9 @@ INJECT_JS = """<script>
             mlSend.addEventListener('click', function() {
                 var text = mlInput.value;
                 if (text) {
-                    var lines = text.split(String.fromCharCode(10));
-                    for (var i = 0; i < lines.length; i++) {
-                        window.__wsSend(lines[i] + String.fromCharCode(13));
-                    }
-                    flash('已发送 ' + lines.length + ' 行');
+                    // Send entire text as one block (preserving newlines)
+                    window.__wsSend(text + String.fromCharCode(13));
+                    flash('已发送');
                 }
                 mlBar.style.display = 'none';
             });
