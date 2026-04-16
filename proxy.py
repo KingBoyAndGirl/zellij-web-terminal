@@ -229,7 +229,6 @@ INJECT_HTML = """<div id="toolbar">
     </div>
 </div>
 
-<textarea id="paste-helper" autofocus></textarea>
 """
 
 # JavaScript to inject (button bindings and other logic)
@@ -346,38 +345,65 @@ INJECT_JS = """<script>
         }
 
         // Paste helper for iOS (no permission required)
-        var pasteHelper = document.getElementById('paste-helper');
+        // Paste function
+        function doPaste() {
+            // Try clipboard API first (desktop/Android)
+            if (navigator.clipboard && navigator.clipboard.readText) {
+                navigator.clipboard.readText().then(function(text) {
+                    if (text) {
+                        window.__wsSend(text);
+                        flash('已粘贴');
+                    }
+                }).catch(function() {
+                    // Fallback: show temporary paste area for iOS
+                    showPasteArea();
+                });
+            } else {
+                // No clipboard API, use fallback
+                showPasteArea();
+            }
+        }
+        
+        // iOS fallback: visible textarea for manual paste
+        function showPasteArea() {
+            var el = document.getElementById('paste-area');
+            if (!el) {
+                el = document.createElement('div');
+                el.id = 'paste-area';
+                el.style.cssText = 'position:fixed;bottom:96px;left:8px;right:8px;z-index:9998;background:#222;border:1px solid #61afef;border-radius:8px;padding:8px;display:flex;gap:6px;align-items:flex-end;';
+                var ta = document.createElement('textarea');
+                ta.id = 'paste-area-input';
+                ta.style.cssText = 'flex:1;height:60px;background:#111;color:#ddd;border:1px solid #444;border-radius:5px;padding:6px;font-family:monospace;font-size:13px;resize:none;outline:none;';
+                ta.placeholder = '长按粘贴文本...';
+                var sendBtn = document.createElement('button');
+                sendBtn.textContent = '发送';
+                sendBtn.style.cssText = 'background:#98c379;color:#111;border:none;border-radius:5px;padding:10px 14px;font-size:13px;font-weight:600;cursor:pointer;height:fit-content;';
+                sendBtn.onclick = function() {
+                    if (ta.value) {
+                        window.__wsSend(ta.value);
+                        flash('已粘贴');
+                    }
+                    el.style.display = 'none';
+                    ta.value = '';
+                };
+                var closeBtn = document.createElement('button');
+                closeBtn.textContent = 'X';
+                closeBtn.style.cssText = 'background:#555;color:#ddd;border:none;border-radius:5px;padding:10px 10px;font-size:13px;cursor:pointer;height:fit-content;';
+                closeBtn.onclick = function() { el.style.display = 'none'; ta.value = ''; };
+                el.appendChild(ta);
+                el.appendChild(sendBtn);
+                el.appendChild(closeBtn);
+                document.body.appendChild(el);
+            }
+            el.style.display = 'flex';
+            setTimeout(function() { document.getElementById('paste-area-input').focus(); }, 100);
+        }
+
+        // Bind paste buttons
         var btnPaste = document.getElementById('btn-paste');
         var btnPaste2 = document.getElementById('btn-paste2');
-        
-        if (pasteHelper) {
-            // Focus on paste helper when paste button clicked
-            function triggerPaste() {
-                pasteHelper.value = '';
-                pasteHelper.focus();
-                // Simulate system paste menu
-                pasteHelper.select();
-            }
-            
-            if (btnPaste) {
-                btnPaste.addEventListener('click', triggerPaste);
-            }
-            if (btnPaste2) {
-                btnPaste2.addEventListener('click', triggerPaste);
-            }
-
-            // Listen for paste event
-            pasteHelper.addEventListener('paste', function(e) {
-                var text = (e.clipboardData || window.clipboardData).getData('text');
-                if (text) {
-                    if (typeof window.__wsSend === 'function') {
-                        window.__wsSend(text);
-                    }
-                }
-                e.preventDefault();
-                pasteHelper.value = '';
-            });
-        }
+        if (btnPaste) btnPaste.addEventListener('click', doPaste);
+        if (btnPaste2) btnPaste2.addEventListener('click', doPaste);
 
         // Flash notification
         function flash(msg) {
