@@ -133,9 +133,15 @@ INJECT_WS_INTERCEPT = """<script>
                     }
                     _lastSent = {d: data, t: now};
                 }
-                console.log('[IME] ws.send ACTUAL SEND:', _hex);
+                console.log('[IME] ws.send ACTUAL SEND:', _hex, 'stack:', new Error().stack.split('\\n').slice(1,4).join(' | '));
                 _nativeSend(data);
             };
+            // Log ALL server messages (echo)
+            var _nativeOnMsg = null;
+            ws.addEventListener('message', function(e) {
+                var _d = typeof e.data === 'string' ? e.data.substring(0, 80) : '[binary]';
+                console.log('[IME] ws.onmessage:', JSON.stringify(_d));
+            });
         } else if (url.indexOf('/ws/control') > -1) {
             window._ctrlWs = ws;
         }
@@ -189,6 +195,34 @@ INJECT_WS_INTERCEPT = """<script>
     // Why this works: xterm.js's CompositionHelper._finalizeComposition(true) reads the textarea
     // after setTimeout(0), calls triggerDataEvent(input) → onData → Zellij's sendFunction → ws.send.
     // This is the exact same path as normal keyboard input, so our existing wrapper handles it.
+    // Global keyboard event logger
+    document.addEventListener('keydown', function(e) {
+        if (e.key.length === 1 || e.key === 'Process') {
+            console.log('[IME] keydown:', e.key, 'code:', e.code, 'isComposing:', e.isComposing);
+        }
+    }, true);
+    document.addEventListener('keyup', function(e) {
+        if (e.key.length === 1 || e.key === 'Process') {
+            console.log('[IME] keyup:', e.key, 'isComposing:', e.isComposing);
+        }
+    }, true);
+    
+    // Log ALL textarea events
+    var _taObserver = new MutationObserver(function() {
+        var ta = document.querySelector('.xterm-helper-textarea');
+        if (ta && !ta._imeLogged) {
+            ta._imeLogged = true;
+            // Log all events on the textarea
+            ['compositionstart', 'compositionupdate', 'compositionend', 'input', 'textInput'].forEach(function(evtName) {
+                ta.addEventListener(evtName, function(e) {
+                    console.log('[IME] textarea.' + evtName + ':', JSON.stringify((e.data || ta.value || '').substring(0, 40)));
+                }, true);  // capture phase to see ALL
+            });
+            console.log('[IME] textarea event listeners attached');
+        }
+    });
+    _taObserver.observe(document.body, {childList: true, subtree: true});
+    
     document.addEventListener('compositionstart', function() {
         window.__imeComposing = true;
         console.log('[IME] compositionstart');
