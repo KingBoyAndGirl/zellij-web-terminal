@@ -120,7 +120,6 @@ INJECT_WS_INTERCEPT = """<script>
             var _lastSent = {d: '', t: 0};
             ws.send = function(data) {
             var _hex = typeof data === 'string' ? Array.from(data).map(function(c){return 'U+'+c.charCodeAt(0).toString(16).padStart(4,'0')}).join(' ') : String(data);
-            console.log('[IME] ws.send called, composing:', window.__imeComposing, 'hex:', _hex, 'len:', data.length, 'stack:', new Error().stack.split('\n').slice(1,3).join(' | '));
             // Block all sends during IME composition
                 if (window.__imeComposing) {
                     console.log('[IME] ws.send BLOCK composing:', _hex);
@@ -178,69 +177,26 @@ INJECT_WS_INTERCEPT = """<script>
     };
     
     // IME Composition event handlers
-    // CRITICAL: xterm.js's _finalizeComposition reads the textarea after a setTimeout(0)
-    // and sends via _coreService.triggerDataEvent → onData → sendFunction → ws.send.
-    // This bypasses our ws.send wrapper. We must:
-    // 1. Clear xterm.js's textarea on compositionend so it reads empty string
-    // 2. Block at the onData callback level as fallback
-    // 3. Stop propagation so xterm.js doesn't process the event at all
-    window.__imeLastSentText = '';
-    window.__imeSentTime = 0;
+    // IME Strategy: Let xterm.js handle composition naturally, ws.send dedup catches duplicates.
+    // Previous approach (stopImmediatePropagation + manual ws.send + textarea clear) was fragile
+    // because it fought xterm.js's internal state machine (_finalizeComposition, _inputEvent).
+    //
+    // How it works now:
+    // 1. compositionstart: __imeComposing = true → blocks ws.send during pinyin typing
+    // 2. compositionend:   __imeComposing = false → xterm.js sends via onData → sendFunction → ws.send
+    // 3. ws.send wrapper:  1000ms identical-text dedup catches any duplicates
+    //
+    // Why this works: xterm.js's CompositionHelper._finalizeComposition(true) reads the textarea
+    // after setTimeout(0), calls triggerDataEvent(input) → onData → Zellij's sendFunction → ws.send.
+    // This is the exact same path as normal keyboard input, so our existing wrapper handles it.
     document.addEventListener('compositionstart', function() {
         window.__imeComposing = true;
         console.log('[IME] compositionstart');
     }, true);
-    document.addEventListener('compositionupdate', function(e) {
-        console.log('[IME] compositionupdate:', e.data);
-    }, true);
     document.addEventListener('compositionend', function(e) {
-        var finalText = e.data || '';
-        console.log('[IME] compositionend, text:', finalText, 'hex:', Array.from(finalText).map(function(c){return 'U+'+c.charCodeAt(0).toString(16).padStart(4,'0')}).join(' '));
-        // Stop xterm.js from seeing this event (prevent _finalizeComposition)
-        e.stopImmediatePropagation();
-        // Also block the subsequent 'input' event (insertText) that fires AFTER compositionend
-        // xterm.js's _inputEvent handler on textarea also sends composed text
-        window.__imeBlockNextInput = true;
-        // Clear xterm.js's textarea so even if its setTimeout(0) fires, it reads nothing
-        var ta = document.querySelector('.xterm-helper-textarea');
-        if (ta) { ta.value = ''; console.log('[IME] textarea cleared'); }
-        // Send the composed text ourselves via ws.send
-        if (finalText.length > 0) {
-            window.__imeLastSentText = finalText;
-            window.__imeSentTime = Date.now();
-            window.__imeComposing = false;
-            var ws = window._termWs;
-            if (ws && ws.readyState === WebSocket.OPEN) {
-                ws.send(finalText);
-                console.log('[IME] SENT via ws.send:', Array.from(finalText).map(function(c){return 'U+'+c.charCodeAt(0).toString(16).padStart(4,'0')}).join(' '));
-            }
-        }
-        // Clear composing flag after a safe delay (longer than xterm.js's setTimeout(0))
+        console.log('[IME] compositionend, text:', e.data || '');
         window.__imeComposing = false;
-        clearTimeout(window.__imeClearTimer);
-        window.__imeClearTimer = setTimeout(function() {
-            window.__imeComposing = false;
-            console.log('[IME] composing cleared');
-        }, 500);
-    }, true);
-    // NOTE: We do NOT block keydown events during composition.
-    // Blocking keydown prevents xterm.js from calling _handleAnyTextareaChanges,
-    // which is needed for proper composition finalization.
-    
-    // CRITICAL FIX: xterm.js also handles the 'input' event (insertText) on the textarea
-    // with addDisposableDomListener(textarea, "input", handler, true).
-    // Even though we stopImmediatePropagation on compositionend, the 'input' event
-    // fires AFTER compositionend as a SEPARATE event. xterm.js's _inputEvent reads
-    // the textarea and calls triggerDataEvent → onData → sendFunction → ws.send.
-    // We must ALSO intercept the 'input' event after compositionend.
-    window.__imeBlockNextInput = false;
-    document.addEventListener('input', function(e) {
-        if (window.__imeBlockNextInput && e.inputType === 'insertText') {
-            window.__imeBlockNextInput = false;
-            console.log('[IME] input BLOCK after compositionend:', e.data);
-            e.stopImmediatePropagation();
-            e.preventDefault();
-        }
+        console.log('[IME] composing cleared (xterm.js will send naturally)');
     }, true);
     
 })();
