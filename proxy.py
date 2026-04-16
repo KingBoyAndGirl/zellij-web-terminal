@@ -317,7 +317,7 @@ INJECT_JS = """<script>
     // Wait for terminal to be ready
     var term = null;
     var checkInterval = setInterval(function() {
-        if (window.term) {
+        if (window.term && window.term._core && window.term._core._compositionHelper) {
             term = window.term;
             clearInterval(checkInterval);
             init();
@@ -325,23 +325,23 @@ INJECT_JS = """<script>
     }, 100);
 
     function init() {
-        // CRITICAL: Disable xterm.js's CompositionHelper entirely
-        // It registers capture-phase handlers on the textarea that run BEFORE our
-        // document-level handlers, causing it to read textarea and write to buffer
-        // before we can intercept. We dispose it and handle IME ourselves.
+        // CRITICAL: Disable xterm.js's CompositionHelper
+        // It registers capture-phase handlers on the textarea that write composed
+        // text directly to the buffer, bypassing our ws.send wrapper.
         (function() {
             var ch = term._core && term._core._compositionHelper;
-            if (ch && ch.dispose) {
-                ch.dispose();
-                console.log('[IME] xterm.js CompositionHelper DISPOSED');
-            } else {
-                // Try to find and disable composition handling another way
-                var keys = Object.keys(term._core || {});
-                console.log('[IME] CompositionHelper not found, _core keys:', keys.join(', '));
-                // Check if it's under a different name
-                if (term._core && term._core.coreService) {
-                    console.log('[IME] coreService keys:', Object.keys(term._core.coreService).join(', '));
+            if (ch) {
+                if (ch.dispose) {
+                    ch.dispose();
+                    console.log('[IME] CompositionHelper disposed');
                 }
+                // Also nullify its methods as backup
+                if (ch._finalizeComposition) ch._finalizeComposition = function(){};
+                if (ch._handleCompositionUpdate) ch._handleCompositionUpdate = function(){};
+                if (ch._handleCompositionStart) ch._handleCompositionStart = function(){};
+                console.log('[IME] CompositionHelper methods neutered');
+            } else {
+                console.log('[IME] CompositionHelper not found at init time');
             }
         })();
 
