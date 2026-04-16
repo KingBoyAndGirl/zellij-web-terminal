@@ -335,14 +335,13 @@ INJECT_JS = """<script>
                 ch.dispose();
                 console.log('[IME] xterm.js CompositionHelper DISPOSED');
             } else {
-                console.log('[IME] WARNING: CompositionHelper not found');
-            }
-            // Also remove the textarea's composition handlers by replacing it
-            var ta = document.querySelector('.xterm-helper-textarea');
-            if (ta) {
-                var newTa = ta.cloneNode(false);
-                ta.parentNode.replaceChild(newTa, ta);
-                console.log('[IME] textarea replaced (handlers cleared)');
+                // Try to find and disable composition handling another way
+                var keys = Object.keys(term._core || {});
+                console.log('[IME] CompositionHelper not found, _core keys:', keys.join(', '));
+                // Check if it's under a different name
+                if (term._core && term._core.coreService) {
+                    console.log('[IME] coreService keys:', Object.keys(term._core.coreService).join(', '));
+                }
             }
         })();
 
