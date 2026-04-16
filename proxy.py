@@ -392,21 +392,30 @@ INJECT_JS = """<script>
         }
 
         // Paste helper for iOS (no permission required)
-        // Paste function
+        // Paste function — clipboard.readText + 500ms cooldown + in-callback dedup
+        var _pasteCooldown = 0;
+        var _lastPastedText = '';
         function doPaste() {
-            // Try clipboard API first (desktop/Android)
+            var now = Date.now();
+            if (now - _pasteCooldown < 500) {
+                console.log('[Hermes] doPaste cooldown, ignoring');
+                return;
+            }
+            _pasteCooldown = now;
+            _lastPastedText = '';
             if (navigator.clipboard && navigator.clipboard.readText) {
                 navigator.clipboard.readText().then(function(text) {
-                    if (text) {
+                    if (text && text !== _lastPastedText) {
+                        _lastPastedText = text;
                         window.__wsSend(text);
                         flash('已粘贴');
+                    } else {
+                        console.log('[Hermes] paste skipped: same text already sent');
                     }
                 }).catch(function() {
-                    // Fallback: show temporary paste area for iOS
                     showPasteArea();
                 });
             } else {
-                // No clipboard API, use fallback
                 showPasteArea();
             }
         }
