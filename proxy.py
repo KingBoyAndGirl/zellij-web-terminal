@@ -120,23 +120,11 @@ INJECT_WS_INTERCEPT = """<script>
             var _lastSent = {d: '', t: 0};
             ws.send = function(data) {
                 var _hex = typeof data === 'string' ? Array.from(data).map(function(c){return 'U+'+c.charCodeAt(0).toString(16).padStart(4,'0')}).join(' ') : String(data);
-                console.log('[IME] ws.send called, composing:', window.__imeComposing, 'blockUntil:', window.__imeBlockUntil, 'hex:', _hex, 'len:', data.length);
+                console.log('[IME] ws.send called, composing:', window.__imeComposing, 'hex:', _hex, 'len:', data.length);
                 // Block all sends during IME composition
                 if (window.__imeComposing) {
-                    console.log('[IME] ws.send BLOCK composing');
+                    console.log('[IME] ws.send BLOCK composing:', _hex);
                     return;
-                }
-                // Post-composition dedup: block DUPLICATE same text within window
-                // First send is always allowed (it's xterm.js's legitimate send)
-                if (window.__imeBlockUntil && Date.now() < window.__imeBlockUntil) {
-                    if (typeof data === 'string' && data === window.__imeBlockText) {
-                        if (window.__imeSentCount > 0) {
-                            console.log('[IME] ws.send BLOCK post-dedup:', _hex);
-                            return;
-                        }
-                        window.__imeSentCount = (window.__imeSentCount || 0) + 1;
-                        console.log('[IME] ws.send ALLOW (first post-ime):', _hex);
-                    }
                 }
                 var now = Date.now();
                 if (typeof data === 'string' && data.length > 0 && data.length < 10000) {
@@ -172,17 +160,6 @@ INJECT_WS_INTERCEPT = """<script>
             console.log('[IME] __wsSend BLOCK composing:', _d);
             return true;
         }
-        // Post-composition dedup
-        if (window.__imeBlockUntil && Date.now() < window.__imeBlockUntil) {
-            if (typeof data === 'string' && data === window.__imeBlockText) {
-                if (window.__imeSentCount > 0) {
-                    console.log('[IME] __wsSend BLOCK post-dedup:', _d);
-                    return true;
-                }
-                window.__imeSentCount = (window.__imeSentCount || 0) + 1;
-                console.log('[IME] __wsSend ALLOW (first post-ime):', _d);
-            }
-        }
         var ws = window._termWs;
         if (ws && ws.readyState === WebSocket.OPEN) {
             var now = Date.now();
@@ -205,7 +182,6 @@ INJECT_WS_INTERCEPT = """<script>
     // We only track state for ws.send dedup — never bypass ws.send with _nativeSend.
     document.addEventListener('compositionstart', function() {
         window.__imeComposing = true;
-        window.__imeSentCount = 0;
         console.log('[IME] compositionstart');
     }, true);
     document.addEventListener('compositionupdate', function(e) {
@@ -214,62 +190,26 @@ INJECT_WS_INTERCEPT = """<script>
     document.addEventListener('compositionend', function(e) {
         var finalText = e.data || '';
         console.log('[IME] compositionend, text:', finalText, 'hex:', Array.from(finalText).map(function(c){return 'U+'+c.charCodeAt(0).toString(16).padStart(4,'0')}).join(' '));
-        // Mark composition done immediately so xterm.js can process normally
-        window.__imeComposing = false;
-        // Store text for dedup: xterm.js will send the same text via setTimeout(0)
-        // through onData → sendFunction → ws.send. Our ws.send wrapper catches it.
+        // DON'T clear __imeComposing yet — keep it true to block xterm.js's
+        // deferred handler (setTimeout 0 → _handleAnyTextareaChanges → onData → ws.send).
+        // We handle the send ourselves:
         if (finalText.length > 0) {
-            window.__imeBlockText = finalText;
-            window.__imeBlockUntil = Date.now() + 2000;
+            var ws = window._termWs;
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(finalText);
+                console.log('[IME] SENT via ws.send:', Array.from(finalText).map(function(c){return 'U+'+c.charCodeAt(0).toString(16).padStart(4,'0')}).join(' '));
+            }
         }
+        // Clear composing flag after xterm.js's setTimeout(0) has fired
+        clearTimeout(window.__imeClearTimer);
+        window.__imeClearTimer = setTimeout(function() {
+            window.__imeComposing = false;
+            console.log('[IME] composing cleared');
+        }, 200);
     }, true);
     // NOTE: We do NOT block keydown events during composition.
     // Blocking keydown prevents xterm.js from calling _handleAnyTextareaChanges,
     // which is needed for proper composition finalization.
-    
-    // Prototype-level interception: catches ALL ws.send calls including
-    // those that bypass our instance wrapper (e.g. WebSocket.prototype.send.call)
-    // Also captures the xterm.js WebSocket reference and overrides send on the instance.
-    (function() {
-        var _origProtoSend = WebSocket.prototype.send;
-        var _origWebSocket = WebSocket;
-        WebSocket = function(url) {
-            var ws = new _origWebSocket(url);
-            // Capture the first WebSocket created as our terminal connection
-            if (!window._termWs) {
-                window._termWs = ws;
-                // Override send on the INSTANCE (shadows prototype)
-                var _wsOrigSend = ws.send.bind(ws);
-                ws.send = function(data) {
-                    // Block during composition
-                    if (window.__imeComposing) {
-                        return;
-                    }
-                    // Post-composition dedup (first send allowed, duplicates blocked)
-                    if (window.__imeBlockUntil && Date.now() < window.__imeBlockUntil) {
-                        if (typeof data === 'string' && data === window.__imeBlockText) {
-                            if (window.__imeSentCount > 0) {
-                                return;
-                            }
-                            window.__imeSentCount = (window.__imeSentCount || 0) + 1;
-                        }
-                    }
-                    return _wsOrigSend(data);
-                };
-            }
-            return ws;
-        };
-        WebSocket.prototype = _origWebSocket.prototype;
-        // Keep prototype-level as fallback for non-intercepted instances
-        WebSocket.prototype.send = function(data) {
-            if (this === window._termWs) {
-                // Delegated to instance-level wrapper (line ~122)
-                return _origProtoSend.call(this, data);
-            }
-            // Other WebSocket instances — pass through
-            return _origProtoSend.call(this, data);
-        };
-    })();
     
 })();
 </script>"""
