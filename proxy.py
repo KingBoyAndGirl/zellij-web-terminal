@@ -124,6 +124,12 @@ INJECT_WS_INTERCEPT = """<script>
                 if (window.__imeComposing) {
                     return;
                 }
+                // Post-composition dedup: block same text within 500ms after compositionend
+                if (window.__imeBlockUntil && Date.now() < window.__imeBlockUntil) {
+                    if (typeof data === 'string' && data === window.__imeBlockText) {
+                        return;
+                    }
+                }
                 var now = Date.now();
                 if (typeof data === 'string' && data.length > 0 && data.length < 10000) {
                     if (_lastSent.d === data && (now - _lastSent.t) < 200) {
@@ -174,19 +180,22 @@ INJECT_WS_INTERCEPT = """<script>
     document.addEventListener('compositionstart', function() {
         window.__imeComposing = true;
     }, true);
-    document.addEventListener('compositionupdate', function() {
+    document.addEventListener('compositionupdate', function(e) {
         // intermediate state — ws.send is already blocked
     }, true);
     document.addEventListener('compositionend', function(e) {
-        // Keep flag TRUE — do NOT clear here
         var finalText = e.data || '';
         if (finalText.length > 0 && window.__imeNativeSend) {
+            // Send final composed text via raw WebSocket (bypasses our wrapper)
             window.__imeNativeSend(finalText);
+            // Sync dedup state so the wrapper can block xterm.js deferred handler
+            window.__imeBlockText = finalText;
+            window.__imeBlockUntil = Date.now() + 500;
         }
-        // Clear flag after 100ms — catches xterm.js deferred handlers
+        // Clear flag after 500ms — catches xterm.js deferred handlers
         setTimeout(function() {
             window.__imeComposing = false;
-        }, 100);
+        }, 500);
     }, true);
     // Block keyboard events during composition (stops xterm.js keydown handler)
     document.addEventListener('keydown', function(e) {
