@@ -233,6 +233,16 @@ INJECT_WS_INTERCEPT = """<script>
                     console.log('[IME] BLOCKED textarea.textInput during composing');
                 }
             }, true);
+            // CRITICAL: Block textarea.compositionend AFTER we send via ws.send
+            // xterm.js reads e.data (immutable) from compositionend to render text
+            ta.addEventListener('compositionend', function(e) {
+                // Our document handler already sent the text via ws.send
+                // Now block xterm.js from also processing it
+                e.stopImmediatePropagation();
+                e.preventDefault();
+                ta.value = '';  // clear any residual
+                console.log('[IME] BLOCKED textarea.compositionend (already sent via ws)');
+            }, true);  // capture phase - fires right after document handler
             console.log('[IME] textarea event listeners attached + input blockers active');
         }
     });
@@ -242,16 +252,16 @@ INJECT_WS_INTERCEPT = """<script>
         window.__imeComposing = true;
         console.log('[IME] compositionstart');
     }, true);
+    // CRITICAL: Block ALL composition events from reaching xterm.js
+    // xterm.js reads e.data from compositionend to render text - we must prevent that
     document.addEventListener('compositionend', function(e) {
-        var finalText = e.data || '';
-        // Also read textarea in case e.data is empty
         var ta = document.querySelector('.xterm-helper-textarea');
+        var finalText = e.data || '';
         if (!finalText && ta && ta.value) {
             finalText = ta.value;
         }
         console.log('[IME] compositionend, text:', finalText);
         if (finalText.length > 0) {
-            // Mark for triggerDataEvent patch to block duplicate
             window.__imeJustSent = true;
             window.__imeJustSentText = finalText;
             window.__imeComposing = false;
@@ -261,11 +271,14 @@ INJECT_WS_INTERCEPT = """<script>
                 console.log('[IME] SENT via ws.send:', Array.from(finalText).map(function(c){return 'U+'+c.charCodeAt(0).toString(16).padStart(4,'0')}).join(' '));
             }
         }
-        // Clear textarea to prevent any residual reads
+        // Clear textarea to prevent xterm.js from reading residual text
         if (ta) { ta.value = ''; }
         window.__imeComposing = false;
         console.log('[IME] composing cleared');
-    }, true);
+        // NOW prevent the event from reaching xterm.js (bubbling textarea handlers)
+        e.stopImmediatePropagation();
+        e.preventDefault();
+    }, true);  // capture phase - we fire first
     
 })();
 </script>"""
