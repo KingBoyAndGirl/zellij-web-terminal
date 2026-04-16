@@ -391,7 +391,7 @@ INJECT_JS = """<script>
                 navigator.clipboard.readText().then(function(text) {
                     if (text && text !== _lastPastedText) {
                         _lastPastedText = text;
-                        window.__wsSend(text);
+                        term.paste(text);
                         flash('已粘贴');
                     }
                 }).catch(function(err) {
@@ -418,7 +418,7 @@ INJECT_JS = """<script>
                 sendBtn.style.cssText = 'background:#98c379;color:#111;border:none;border-radius:5px;padding:10px 14px;font-size:13px;font-weight:600;cursor:pointer;height:fit-content;';
                 sendBtn.onclick = function() {
                     if (ta.value) {
-                        window.__wsSend(ta.value);
+                        term.paste(ta.value);
                         flash('已粘贴');
                     }
                     el.style.display = 'none';
@@ -458,6 +458,8 @@ INJECT_JS = """<script>
         // clipboard read → onData → sendFunction → ws.send.
         // We do NOT intercept paste events — let xterm.js handle everything.
         // For Chinese IME, xterm.js natively handles composition events.
+        // For button paste: use term.paste(text) instead of __wsSend to go through
+        // the same xterm.js input pipeline as Ctrl+Shift+V (proven no duplication).
         // Keyboard shortcuts
         document.addEventListener('keydown', function(e) {
             if (e.key === 'Enter' && (e.shiftKey || e.altKey)) {
