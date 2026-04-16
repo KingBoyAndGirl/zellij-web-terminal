@@ -164,7 +164,7 @@ INJECT_HTML = """<div id="toolbar">
     <div class="row">
         <button class="btn" id="btn-esc">ESC</button>
         <button class="btn" id="btn-enter">↵ Enter</button>
-        <button class="btn" id="btn-newline">↩ 换行</button>
+        <button class="btn" id="btn-multiline">📝 多行</button>
         <button class="btn bl" id="btn-edit">编辑</button>
         <button class="btn pk" id="btn-zellij">操作</button>
     </div>
@@ -229,7 +229,19 @@ INJECT_HTML = """<div id="toolbar">
     </div>
 </div>
 
-<textarea id="paste-helper" autofocus></textarea>"""
+<textarea id="paste-helper" autofocus></textarea>
+
+<!-- Multi-line input panel -->
+<div id="multiline-overlay" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.8);z-index:9999;display:none;flex-direction:column;padding:8px;">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+        <span style="color:#aaa;font-size:14px;">📝 多行输入</span>
+        <div>
+            <button id="ml-send" style="background:#98c379;color:#111;border:none;border-radius:6px;padding:8px 16px;font-size:14px;font-weight:600;margin-right:8px;cursor:pointer;">发送</button>
+            <button id="ml-cancel" style="background:#e06c75;color:#111;border:none;border-radius:6px;padding:8px 16px;font-size:14px;font-weight:600;cursor:pointer;">取消</button>
+        </div>
+    </div>
+    <textarea id="ml-input" style="flex:1;background:#1a1a1a;color:#ddd;border:1px solid #444;border-radius:6px;padding:12px;font-family:monospace;font-size:14px;resize:none;outline:none;" placeholder="在此输入多行命令...&#10;每行将依次发送到终端&#10;空行也会发送 Enter"></textarea>
+</div>"""
 
 # JavaScript to inject (button bindings and other logic)
 INJECT_JS = """<script>
@@ -253,7 +265,6 @@ INJECT_JS = """<script>
         var keyMap = {
             'btn-esc': '\\x1b',
             'btn-enter': '\\r',
-            'btn-newline': '\\n',
             'btn-up': '\\x1b[A',
             'btn-down': '\\x1b[B',
             'btn-left': '\\x1b[D',
@@ -447,6 +458,39 @@ INJECT_JS = """<script>
                 if (termWrap) {
                     termWrap.style.height = (window.visualViewport.height - 90) + 'px';
                 }
+            });
+        }
+        
+        // Multi-line input panel
+        var mlOverlay = document.getElementById('multiline-overlay');
+        var mlInput = document.getElementById('ml-input');
+        var mlSend = document.getElementById('ml-send');
+        var mlCancel = document.getElementById('ml-cancel');
+        var btnMultiline = document.getElementById('btn-multiline');
+        
+        if (btnMultiline && mlOverlay) {
+            btnMultiline.addEventListener('click', function() {
+                mlOverlay.style.display = 'flex';
+                mlInput.value = '';
+                mlInput.focus();
+            });
+        }
+        if (mlCancel && mlOverlay) {
+            mlCancel.addEventListener('click', function() {
+                mlOverlay.style.display = 'none';
+            });
+        }
+        if (mlSend && mlInput) {
+            mlSend.addEventListener('click', function() {
+                var text = mlInput.value;
+                if (text) {
+                    var lines = text.split('\\n');
+                    for (var i = 0; i < lines.length; i++) {
+                        window.__wsSend(lines[i] + '\\r');
+                    }
+                }
+                mlOverlay.style.display = 'none';
+                flash('已发送 ' + text.split('\\n').length + ' 行');
             });
         }
         
