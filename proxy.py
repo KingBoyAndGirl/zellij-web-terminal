@@ -317,18 +317,9 @@ INJECT_JS = """<script>
             var origOnData = term.onData.bind(term);
             term.onData = function(callback) {
                 return origOnData(function(data) {
-                    // Block composed text: if within 500ms of our compositionend send
-                    var elapsed = Date.now() - (window.__imeSentTime || 0);
-                    if (elapsed < 500 && data === window.__imeLastSentText) {
-                        console.log('[IME] onData BLOCK (duplicate):', data.substring(0, 20));
-                        return;
-                    }
-                    // Also block if composing flag is set
                     if (window.__imeComposing) {
-                        console.log('[IME] onData BLOCK (composing):', data.substring(0, 20));
                         return;
                     }
-                    console.log('[IME] onData PASS:', data.substring(0, 20));
                     callback(data);
                 });
             };
