@@ -202,6 +202,9 @@ INJECT_WS_INTERCEPT = """<script>
         }
         console.log('[IME] compositionend, text:', finalText);
         if (finalText.length > 0) {
+            // Mark for triggerDataEvent patch to block duplicate
+            window.__imeJustSent = true;
+            window.__imeJustSentText = finalText;
             window.__imeComposing = false;
             var ws = window._termWs;
             if (ws && ws.readyState === WebSocket.OPEN) {
@@ -372,23 +375,27 @@ INJECT_JS = """<script>
             };
         })();
 
-        // IME OnData wrapper: intercept xterm.js's onData callbacks to block
-        // composed text that bypasses our ws.send wrapper.
-        // xterm.js's _finalizeComposition sends via _coreService.triggerDataEvent →
-        // onData → sendFunction(ws.send). We also track at the onData level.
+        // NUCLEAR OPTION: Monkey-patch _coreService.triggerDataEvent to intercept
+        // xterm.js's internal composition sending. This is the only path that
+        // bypasses ALL our wrappers (ws.send, __wsSend, term.onData).
+        // xterm.js calls: _finalizeComposition → triggerDataEvent(data) →
+        //   _onData.fire(data) → Zellij's sendFunction → ws.send
         (function() {
-            var origOnData = term.onData.bind(term);
-            term.onData = function(callback) {
-                return origOnData(function(data) {
-                    if (window.__imeComposing) {
+            var cs = term._core.coreService;
+            if (cs && cs.triggerDataEvent) {
+                var origTrigger = cs.triggerDataEvent.bind(cs);
+                cs.triggerDataEvent = function(data, wasUserInput) {
+                    // If we just sent this via our compositionend handler, block
+                    if (window.__imeJustSent && data === window.__imeJustSentText) {
+                        console.log('[IME] BLOCKED triggerDataEvent:', JSON.stringify(data.substring(0, 20)));
+                        window.__imeJustSent = false;
+                        window.__imeJustSentText = '';
                         return;
                     }
-                    callback(data);
-                });
-            };
-            // Re-register any existing onData callbacks with the new wrapper
-            // (the original callbacks are already registered, but new ones will go through us)
-            console.log('[IME] term.onData wrapper installed');
+                    return origTrigger(data, wasUserInput);
+                };
+                console.log('[IME] triggerDataEvent patched');
+            }
         })();
 
         // Button mappings - ESC sequences
