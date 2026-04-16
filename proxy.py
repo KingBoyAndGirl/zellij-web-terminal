@@ -114,7 +114,22 @@ INJECT_WS_INTERCEPT = """<script>
         // Store reference based on URL
         if (url.indexOf('/ws/terminal') > -1) {
             window._termWs = ws;
-            console.log('[Hermes] Terminal WebSocket captured:', url, 'readyState:', ws.readyState);
+            // Wrap ws.send with dedup to prevent double paste from
+            // ClipboardAddon + any residual handlers (buttons, etc.)
+            var _nativeSend = ws.send.bind(ws);
+            var _lastSent = {d: '', t: 0};
+            ws.send = function(data) {
+                var now = Date.now();
+                if (typeof data === 'string' && data.length > 0 && data.length < 10000) {
+                    if (_lastSent.d === data && (now - _lastSent.t) < 200) {
+                        console.log('[Hermes] ws.send dedup dropped:', JSON.stringify(data.substring(0, 50)));
+                        return;
+                    }
+                    _lastSent = {d: data, t: now};
+                }
+                _nativeSend(data);
+            };
+            console.log('[Hermes] Terminal WebSocket captured:', url, 'with send dedup');
         } else if (url.indexOf('/ws/control') > -1) {
             window._ctrlWs = ws;
             console.log('[Hermes] Control WebSocket captured:', url);
@@ -130,9 +145,20 @@ INJECT_WS_INTERCEPT = """<script>
     window.WebSocket.CLOSED = OriginalWebSocket.CLOSED;
     
     // Helper function to send data to terminal WebSocket
+    // Dedup state for __wsSend
+    window.__wsLast = {d: '', t: 0};
     window.__wsSend = function(data) {
         var ws = window._termWs;
         if (ws && ws.readyState === WebSocket.OPEN) {
+            // Deduplicate: drop exact same data within 200ms
+            var now = Date.now();
+            if (typeof data === 'string' && data.length > 0 && data.length < 10000) {
+                if (window.__wsLast.d === data && (now - window.__wsLast.t) < 200) {
+                    console.log('[Hermes] __wsSend dedup dropped:', JSON.stringify(data.substring(0, 50)));
+                    return true; // Pretend it was sent
+                }
+                window.__wsLast = {d: data, t: now};
+            }
             ws.send(data);
             console.log('[Hermes] Sent:', JSON.stringify(data), 'readyState:', ws.readyState);
             return true;
@@ -197,6 +223,13 @@ INJECT_HTML = """<div id="toolbar">
         <button class="btn" id="btn-ctrlu">^U 删行</button>
         <button class="btn" id="btn-ctrlk">^K 删尾</button>
         <button class="btn" id="btn-ctrlw">^W 删词</button>
+    </div>
+    <div class="row">
+        <button class="btn gn" id="btn-save">💾 :wq!</button>
+        <button class="btn rd" id="btn-quitvim">❌ :q!</button>
+        <button class="btn yl" id="btn-search">🔍 搜索</button>
+        <button class="btn" id="btn-search-prev">◀ 上一个</button>
+        <button class="btn" id="btn-search-next">▶ 下一个</button>
     </div>
 </div>
 
@@ -268,6 +301,12 @@ INJECT_JS = """<script>
             'btn-ctrlu': '\\x15',
             'btn-ctrlk': '\\x0b',
             'btn-ctrlw': '\\x17',
+            // vim & search
+            'btn-search': String.fromCharCode(12),  // Ctrl+R reverse search
+            'btn-search-prev': String.fromCharCode(12),  // Ctrl+R = previous match
+            'btn-search-next': String.fromCharCode(19),  // Ctrl+S = next match
+            'btn-save': '\\x1b:wq!\\r',    // ESC + :wq!
+            'btn-quitvim': '\\x1b:q!\\r',    // ESC + :q!
             'btn-ctrlc': '\\x03',
             'btn-newtab': '\\x1bn',
             'btn-close': '\\x1bx',
@@ -407,6 +446,7 @@ INJECT_JS = """<script>
             setTimeout(function() { document.getElementById('paste-area-input').focus(); }, 100);
         }
 
+        var triggerPaste = doPaste;
         // Bind paste buttons
         var btnPaste = document.getElementById('btn-paste');
         var btnPaste2 = document.getElementById('btn-paste2');
@@ -422,26 +462,11 @@ INJECT_JS = """<script>
             setTimeout(function() { el.remove(); }, 1000);
         }
 
-        // Chinese IME fix - prevent double input during composition
-        var composing = false;
-        var textarea = document.querySelector('textarea.xterm-helper-textarea');
-        if (textarea) {
-            textarea.addEventListener('compositionstart', function() {
-                composing = true;
-            });
-            textarea.addEventListener('compositionend', function(e) {
-                composing = false;
-                // Don't send here - xterm.js already sends composed text via onData
-                // Just clean up the textarea
-                textarea.value = '';
-            });
-            textarea.addEventListener('input', function(e) {
-                if (composing) {
-                    e.stopImmediatePropagation();
-                    e.preventDefault();
-                }
-            }, true);
-        }
+        // Zellij uses ClipboardAddon (@xterm/addon-clipboard) natively for paste.
+        // input.js passes Cmd+V/Ctrl+Shift+V through to xterm.js, which handles
+        // clipboard read → onData → sendFunction → ws.send.
+        // We do NOT intercept paste events — let xterm.js handle everything.
+        // For Chinese IME, xterm.js natively handles composition events.
 
         // Keyboard shortcuts
         document.addEventListener('keydown', function(e) {
@@ -465,11 +490,8 @@ INJECT_JS = """<script>
                 }
                 return;
             }
-            if (e.key === 'V' && e.ctrlKey && e.shiftKey) {
-                e.preventDefault();
-                triggerPaste();
-                return;
-            }
+            // Cmd+V / Ctrl+V / Ctrl+Shift+V — let xterm.js + ClipboardAddon handle natively.
+            // Zellij's input.js passes these through to xterm.js.
         });
 
         // Visual viewport resize
