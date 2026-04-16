@@ -126,11 +126,16 @@ INJECT_WS_INTERCEPT = """<script>
                     console.log('[IME] ws.send BLOCK composing');
                     return;
                 }
-                // Post-composition dedup: block same text within 500ms after compositionend
+                // Post-composition dedup: block DUPLICATE same text within window
+                // First send is always allowed (it's xterm.js's legitimate send)
                 if (window.__imeBlockUntil && Date.now() < window.__imeBlockUntil) {
                     if (typeof data === 'string' && data === window.__imeBlockText) {
-                        console.log('[IME] ws.send BLOCK post-dedup:', _hex);
-                        return;
+                        if (window.__imeSentCount > 0) {
+                            console.log('[IME] ws.send BLOCK post-dedup:', _hex);
+                            return;
+                        }
+                        window.__imeSentCount = (window.__imeSentCount || 0) + 1;
+                        console.log('[IME] ws.send ALLOW (first post-ime):', _hex);
                     }
                 }
                 var now = Date.now();
@@ -170,8 +175,12 @@ INJECT_WS_INTERCEPT = """<script>
         // Post-composition dedup
         if (window.__imeBlockUntil && Date.now() < window.__imeBlockUntil) {
             if (typeof data === 'string' && data === window.__imeBlockText) {
-                console.log('[IME] __wsSend BLOCK post-dedup:', _d);
-                return true;
+                if (window.__imeSentCount > 0) {
+                    console.log('[IME] __wsSend BLOCK post-dedup:', _d);
+                    return true;
+                }
+                window.__imeSentCount = (window.__imeSentCount || 0) + 1;
+                console.log('[IME] __wsSend ALLOW (first post-ime):', _d);
             }
         }
         var ws = window._termWs;
@@ -196,6 +205,7 @@ INJECT_WS_INTERCEPT = """<script>
     // We only track state for ws.send dedup — never bypass ws.send with _nativeSend.
     document.addEventListener('compositionstart', function() {
         window.__imeComposing = true;
+        window.__imeSentCount = 0;
         console.log('[IME] compositionstart');
     }, true);
     document.addEventListener('compositionupdate', function(e) {
@@ -235,10 +245,13 @@ INJECT_WS_INTERCEPT = """<script>
                     if (window.__imeComposing) {
                         return;
                     }
-                    // Post-composition dedup
+                    // Post-composition dedup (first send allowed, duplicates blocked)
                     if (window.__imeBlockUntil && Date.now() < window.__imeBlockUntil) {
                         if (typeof data === 'string' && data === window.__imeBlockText) {
-                            return;
+                            if (window.__imeSentCount > 0) {
+                                return;
+                            }
+                            window.__imeSentCount = (window.__imeSentCount || 0) + 1;
                         }
                     }
                     return _wsOrigSend(data);
