@@ -119,9 +119,9 @@ INJECT_WS_INTERCEPT = """<script>
             var _nativeSend = ws.send.bind(ws);
             var _lastSent = {d: '', t: 0};
             ws.send = function(data) {
-                var _hex = typeof data === 'string' ? Array.from(data).map(function(c){return 'U+'+c.charCodeAt(0).toString(16).padStart(4,'0')}).join(' ') : String(data);
-                console.log('[IME] ws.send called, composing:', window.__imeComposing, 'hex:', _hex, 'len:', data.length);
-                // Block all sends during IME composition
+            var _hex = typeof data === 'string' ? Array.from(data).map(function(c){return 'U+'+c.charCodeAt(0).toString(16).padStart(4,'0')}).join(' ') : String(data);
+            console.log('[IME] ws.send called, composing:', window.__imeComposing, 'hex:', _hex, 'len:', data.length, 'stack:', new Error().stack.split('\n').slice(1,3).join(' | '));
+            // Block all sends during IME composition
                 if (window.__imeComposing) {
                     console.log('[IME] ws.send BLOCK composing:', _hex);
                     return;
@@ -198,6 +198,9 @@ INJECT_WS_INTERCEPT = """<script>
         console.log('[IME] compositionend, text:', finalText, 'hex:', Array.from(finalText).map(function(c){return 'U+'+c.charCodeAt(0).toString(16).padStart(4,'0')}).join(' '));
         // Stop xterm.js from seeing this event (prevent _finalizeComposition)
         e.stopImmediatePropagation();
+        // Also block the subsequent 'input' event (insertText) that fires AFTER compositionend
+        // xterm.js's _inputEvent handler on textarea also sends composed text
+        window.__imeBlockNextInput = true;
         // Clear xterm.js's textarea so even if its setTimeout(0) fires, it reads nothing
         var ta = document.querySelector('.xterm-helper-textarea');
         if (ta) { ta.value = ''; console.log('[IME] textarea cleared'); }
@@ -223,6 +226,22 @@ INJECT_WS_INTERCEPT = """<script>
     // NOTE: We do NOT block keydown events during composition.
     // Blocking keydown prevents xterm.js from calling _handleAnyTextareaChanges,
     // which is needed for proper composition finalization.
+    
+    // CRITICAL FIX: xterm.js also handles the 'input' event (insertText) on the textarea
+    // with addDisposableDomListener(textarea, "input", handler, true).
+    // Even though we stopImmediatePropagation on compositionend, the 'input' event
+    // fires AFTER compositionend as a SEPARATE event. xterm.js's _inputEvent reads
+    // the textarea and calls triggerDataEvent → onData → sendFunction → ws.send.
+    // We must ALSO intercept the 'input' event after compositionend.
+    window.__imeBlockNextInput = false;
+    document.addEventListener('input', function(e) {
+        if (window.__imeBlockNextInput && e.inputType === 'insertText') {
+            window.__imeBlockNextInput = false;
+            console.log('[IME] input BLOCK after compositionend:', e.data);
+            e.stopImmediatePropagation();
+            e.preventDefault();
+        }
+    }, true);
     
 })();
 </script>"""
