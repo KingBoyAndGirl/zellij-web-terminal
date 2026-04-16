@@ -11,7 +11,7 @@
 2. **手机快捷按钮**: ✅ 复制、粘贴、回车、换行、方向键、ESC、^C 等
 3. **PC 快捷键**: ✅ Shift+Enter / Alt+Enter 换行
 4. **中文输入法不重复**: ✅ xterm.js 原生 composition 事件处理 + ws.send 去重
-5. **粘贴不重复**: ✅ 移除自定义粘贴拦截，Zellij ClipboardAddon 原生处理 + ws.send 去重 (2026-04-16)
+5. **粘贴不重复**: ✅ 按钮粘贴改用 term.paste() 走 xterm.js 原生路径 (2026-04-16)
 6. **环境变量继承**: ✅ `bash -l -c` 加 PATH 环境变量
 7. **所有设备同一配色**: ✅ XTerm 风格，黑底白字
 8. **免认证**: ✅ 代理自动拦截 /command/login 和 /session
