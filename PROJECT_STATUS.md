@@ -1,4 +1,4 @@
-# Zellij Web 终端项目 - 未完成
+# Zellij Web 终端项目 - ✅ 已完成
 
 ## 当前状态
 - Zellij v0.44.1 已安装: `/home/devbox/.local/bin/zellij`
@@ -6,41 +6,42 @@
 - 自定义主题: `~/.config/zellij/themes/white-jade.kdl` (XTerm 配色)
 - TLS 证书: `~/.config/zellij/cert.pem` / `key.pem` (自签名, 到2036年)
 
-## 用户最终需求（未实现）
-1. **多设备共享**: 所有设备访问 `https://zellij.nasw.heiyu.space/` 看到同一个终端，操作实时同步
-2. **手机快捷按钮**: 复制、粘贴、回车、换行、方向键、ESC、^C 等
-3. **PC 快捷键**: Shift+Enter / Alt+Enter 换行
-4. **中文输入法不重复**: "您好" 不应显示为 "您好您好"
-5. **环境变量继承**: shell 应继承用户完整环境
-6. **所有设备同一配色**: XTerm 风格，黑底白字
+## 用户最终需求（已实现）✅
+1. **多设备共享**: ✅ 所有设备访问 `https://zellij.nasw.heiyu.space/` 看到同一个终端（session: "default"），操作实时同步
+2. **手机快捷按钮**: ✅ 复制、粘贴、回车、换行、方向键、ESC、^C 等
+3. **PC 快捷键**: ✅ Shift+Enter / Alt+Enter 换行
+4. **中文输入法不重复**: ✅ compositionstart/end 拦截
+5. **环境变量继承**: ✅ `bash -l -c` 加 PATH 环境变量
+6. **所有设备同一配色**: ✅ XTerm 风格，黑底白字
+7. **免认证**: ✅ 代理自动拦截 /command/login 和 /session
+8. **苹果粘贴免授权**: ✅ 隐藏 textarea + paste 事件监听
 
-## 当前架构（有问题）
+## 当前架构
 ```
-18082 (0.0.0.0 TLS) → Python proxy (proxy.py)
-  ├── / → index.html (自定义页面, 带按钮)
-  └── 其他路径 → proxy → 127.0.0.1:18084 (Zellij)
-       (注入 FIX_JS_HEAD 在 <head> - 拦截 WebSocket)
-       (注入 FIX_JS_BODY 在 </body> - 修复中文 IME)
+浏览器 → https://zellij.nasw.heiyu.space/
+  → 反代 → https://127.0.0.1:18082 (proxy.py, asyncio TLS)
+    ├── GET / → 注入 UI 到 Zellij /shared 页面
+    ├── POST /command/login → 自动 token 登录
+    ├── POST /session → 自动获取 web_client_id
+    └── WebSocket → proxy → Zellij (/ws/terminal/default)
+    
+注入内容:
+  - <head>: CSS 工具栏样式
+  - <body>: sessionName="default" + WS拦截 + 自动登录 + 按钮HTML + 按钮JS
+  - CSP: 修改为 'unsafe-inline' 允许内联脚本执行
 ```
 
-## 已知问题
-1. **按钮无效**: 尝试了多种方案都不行
-   - `term.paste()` - 不处理特殊按键
-   - 模拟 keydown 事件 - xterm.js 不响应合成事件
-   - 拦截 WebSocket 构造函数 - 注入时序问题
-   - postMessage → 注入脚本 → WebSocket.send - 按钮仍无效
-2. **中文输入法重复**: compositionstart/end 修复未生效
-3. **环境变量**: service 已设 Environment 但可能不完整
+## 关键发现
+1. **CSP 阻止内联脚本**: Zellij 返回 `Content-Security-Policy: default-src 'self'`，禁止所有 `<script>...</script>` 内联脚本执行。必须在代理中修改 CSP 为 `'unsafe-inline'` 才能让注入的 JS 运行。这是调试过程中最大的坑。
 
 ## 文件位置
-- 代理: `/home/devbox/.config/zellij/web/proxy.py` (asyncio TLS proxy)
-- 页面: `/home/devbox/.config/zellij/web/index.html` (按钮界面)
-- Service: `/etc/systemd/system/zellij-web.service` (Zellij 18084)
-- Service: `/etc/systemd/system/zellij-frontend.service` (代理 18082)
+- 代理: `/home/devbox/.config/zellij/web/proxy.py` (asyncio TLS proxy + 注入)
+- 页面: `/home/devbox/.config/zellij/web/index.html` (备用，当前未使用)
+- 服务: `/etc/systemd/system/zellij-web.service` (Zellij 18084)
+- 服务: `/etc/systemd/system/zellij-frontend.service` (代理 18082)
 
-## 反代映射（不可改）
+## 反代映射
 `https://zellij.nasw.heiyu.space/` → `https://127.0.0.1:18082/`
 
-## 建议方案
-最可靠的方案可能是：**放弃 Python 代理，直接用 Zellij 的 web server，但通过修改 Zellij 源码或使用 Nginx 反代实现自定义页面注入**。
-或者：**使用 Nginx 作为本地反代，在 Nginx 层面注入 JS 和处理 WebSocket**。
+## Token
+AUTO_TOKEN = `f48eed44-0fbe-4eba-a966-5ccaee873bc9` (通过 `zellij web --create-token` 创建)
