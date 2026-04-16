@@ -309,6 +309,24 @@ INJECT_JS = """<script>
     }, 100);
 
     function init() {
+        // term.write interceptor: log and dedup IME renders
+        (function() {
+            var origWrite = term.write.bind(term);
+            var _lastWrite = {d: '', t: 0};
+            term.write = function(data) {
+                var now = Date.now();
+                if (typeof data === 'string' && data.length > 0 && data.length < 500) {
+                    console.log('[IME] term.write:', JSON.stringify(data.substring(0, 80)));
+                    if (_lastWrite.d === data && (now - _lastWrite.t) < 200) {
+                        console.log('[IME] term.write DEDUP');
+                        return;
+                    }
+                    _lastWrite = {d: data, t: now};
+                }
+                return origWrite(data);
+            };
+        })();
+
         // IME OnData wrapper: intercept xterm.js's onData callbacks to block
         // composed text that bypasses our ws.send wrapper.
         // xterm.js's _finalizeComposition sends via _coreService.triggerDataEvent →
