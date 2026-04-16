@@ -327,17 +327,25 @@ INJECT_JS = """<script>
             });
         }
 
-        // Copy function
+        // Copy function - use execCommand for broader compatibility
         var btnCopy = document.getElementById('btn-copy');
         if (btnCopy) {
             btnCopy.addEventListener('click', function() {
                 if (term && term.hasSelection && term.hasSelection()) {
-                    var selection = term.getSelection();
-                    navigator.clipboard.writeText(selection).then(function() {
+                    var text = term.getSelection();
+                    var ta = document.createElement('textarea');
+                    ta.value = text;
+                    ta.style.position = 'fixed';
+                    ta.style.left = '-9999px';
+                    document.body.appendChild(ta);
+                    ta.select();
+                    try {
+                        document.execCommand('copy');
                         flash('已复制 ✓');
-                    }).catch(function() {
+                    } catch(e) {
                         flash('复制失败');
-                    });
+                    }
+                    document.body.removeChild(ta);
                 } else {
                     flash('请先选中文本');
                 }
@@ -414,7 +422,7 @@ INJECT_JS = """<script>
             setTimeout(function() { el.remove(); }, 1000);
         }
 
-        // Chinese IME fix
+        // Chinese IME fix - prevent double input during composition
         var composing = false;
         var textarea = document.querySelector('textarea.xterm-helper-textarea');
         if (textarea) {
@@ -423,12 +431,9 @@ INJECT_JS = """<script>
             });
             textarea.addEventListener('compositionend', function(e) {
                 composing = false;
-                if (e.data) {
-                    if (typeof window.__wsSend === 'function') {
-                        window.__wsSend(e.data);
-                    }
-                    textarea.value = '';
-                }
+                // Don't send here - xterm.js already sends composed text via onData
+                // Just clean up the textarea
+                textarea.value = '';
             });
             textarea.addEventListener('input', function(e) {
                 if (composing) {
