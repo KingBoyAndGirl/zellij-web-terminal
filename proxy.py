@@ -381,20 +381,35 @@ INJECT_JS = """<script>
         // xterm.js calls: _finalizeComposition → triggerDataEvent(data) →
         //   _onData.fire(data) → Zellij's sendFunction → ws.send
         (function() {
-            var cs = term._core.coreService;
+            var cs = term._core && term._core.coreService;
             if (cs && cs.triggerDataEvent) {
                 var origTrigger = cs.triggerDataEvent.bind(cs);
                 cs.triggerDataEvent = function(data, wasUserInput) {
+                    console.log('[IME] triggerDataEvent called:', JSON.stringify(String(data).substring(0, 40)), 'justSent:', window.__imeJustSent);
                     // If we just sent this via our compositionend handler, block
                     if (window.__imeJustSent && data === window.__imeJustSentText) {
-                        console.log('[IME] BLOCKED triggerDataEvent:', JSON.stringify(data.substring(0, 20)));
+                        console.log('[IME] BLOCKED triggerDataEvent duplicate');
                         window.__imeJustSent = false;
                         window.__imeJustSentText = '';
                         return;
                     }
                     return origTrigger(data, wasUserInput);
                 };
-                console.log('[IME] triggerDataEvent patched');
+                console.log('[IME] triggerDataEvent patched OK');
+            } else {
+                // Dump what we CAN find
+                var coreKeys = Object.keys(term._core || {});
+                console.log('[IME] triggerDataEvent NOT FOUND. _core keys:', coreKeys.join(', '));
+                // Check all _core properties for triggerDataEvent or similar
+                for (var i = 0; i < coreKeys.length; i++) {
+                    var val = term._core[coreKeys[i]];
+                    if (val && typeof val === 'object') {
+                        var subKeys = Object.keys(val);
+                        if (subKeys.indexOf('triggerDataEvent') >= 0 || subKeys.indexOf('_onData') >= 0) {
+                            console.log('[IME] Found in _core.' + coreKeys[i] + ':', subKeys.join(', '));
+                        }
+                    }
+                }
             }
         })();
 
