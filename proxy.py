@@ -117,6 +117,7 @@ INJECT_WS_INTERCEPT = """<script>
             // Wrap ws.send with dedup to prevent double paste from
             // ClipboardAddon + any residual handlers (buttons, etc.)
             var _nativeSend = ws.send.bind(ws);
+            window.__imeNativeSend = _nativeSend;
             var _lastSent = {d: '', t: 0};
             ws.send = function(data) {
                 // Block all sends during IME composition
@@ -177,9 +178,22 @@ INJECT_WS_INTERCEPT = """<script>
         // intermediate state — ws.send is already blocked
     }, true);
     document.addEventListener('compositionend', function(e) {
-        window.__imeComposing = false;
-        // Do NOT send here — xterm.js CompositionHelper will fire onData
-        // with the final text. We only need to block intermediate sends.
+        // Keep flag TRUE — do NOT clear here
+        var finalText = e.data || '';
+        if (finalText.length > 0 && window.__imeNativeSend) {
+            window.__imeNativeSend(finalText);
+        }
+        // Clear flag after 100ms — catches xterm.js deferred handlers
+        setTimeout(function() {
+            window.__imeComposing = false;
+        }, 100);
+    }, true);
+    // Block keyboard events during composition (stops xterm.js keydown handler)
+    document.addEventListener('keydown', function(e) {
+        if (window.__imeComposing) {
+            e.stopImmediatePropagation();
+            e.preventDefault();
+        }
     }, true);
     
 })();
