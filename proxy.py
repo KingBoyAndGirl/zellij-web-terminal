@@ -207,7 +207,7 @@ INJECT_WS_INTERCEPT = """<script>
         }
     }, true);
     
-    // Log ALL textarea events
+    // Log ALL textarea events AND block input/textInput during IME
     var _taObserver = new MutationObserver(function() {
         var ta = document.querySelector('.xterm-helper-textarea');
         if (ta && !ta._imeLogged) {
@@ -218,7 +218,22 @@ INJECT_WS_INTERCEPT = """<script>
                     console.log('[IME] textarea.' + evtName + ':', JSON.stringify((e.data || ta.value || '').substring(0, 40)));
                 }, true);  // capture phase to see ALL
             });
-            console.log('[IME] textarea event listeners attached');
+            // CRITICAL: Block input/textInput during IME to prevent xterm.js rendering
+            ta.addEventListener('input', function(e) {
+                if (window.__imeComposing) {
+                    e.stopImmediatePropagation();
+                    e.preventDefault();
+                    console.log('[IME] BLOCKED textarea.input during composing');
+                }
+            }, true);
+            ta.addEventListener('textInput', function(e) {
+                if (window.__imeComposing) {
+                    e.stopImmediatePropagation();
+                    e.preventDefault();
+                    console.log('[IME] BLOCKED textarea.textInput during composing');
+                }
+            }, true);
+            console.log('[IME] textarea event listeners attached + input blockers active');
         }
     });
     _taObserver.observe(document.body, {childList: true, subtree: true});
