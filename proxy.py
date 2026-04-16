@@ -164,7 +164,7 @@ INJECT_HTML = """<div id="toolbar">
     <div class="row">
         <button class="btn" id="btn-esc">ESC</button>
         <button class="btn" id="btn-enter">↵ Enter</button>
-        <button class="btn" id="btn-multiline">📝 多行</button>
+        <button class="btn" id="btn-newline">↩ 换行</button>
         <button class="btn bl" id="btn-edit">编辑</button>
         <button class="btn pk" id="btn-zellij">操作</button>
     </div>
@@ -230,15 +230,7 @@ INJECT_HTML = """<div id="toolbar">
 </div>
 
 <textarea id="paste-helper" autofocus></textarea>
-
-<!-- Multi-line input (inline above toolbar) -->
-<div id="ml-bar" style="display:none;position:fixed;bottom:90px;left:0;right:0;background:#1a1a1a;border-top:1px solid #444;padding:6px;z-index:997;">
-    <div style="display:flex;gap:4px;margin-bottom:4px;">
-        <button id="ml-send" style="flex:1;background:#98c379;color:#111;border:none;border-radius:5px;padding:6px;font-size:13px;font-weight:600;cursor:pointer;">发送</button>
-        <button id="ml-cancel" style="width:50px;background:#555;color:#ddd;border:none;border-radius:5px;padding:6px;font-size:13px;cursor:pointer;">取消</button>
-    </div>
-    <textarea id="ml-input" style="width:100%;height:80px;background:#111;color:#ddd;border:1px solid #444;border-radius:5px;padding:8px;font-family:monospace;font-size:13px;resize:vertical;outline:none;box-sizing:border-box;" placeholder="粘贴或输入多行文本，发送作为一条命令输入"></textarea>
-</div>"""
+"""
 
 # JavaScript to inject (button bindings and other logic)
 INJECT_JS = """<script>
@@ -262,6 +254,7 @@ INJECT_JS = """<script>
         var keyMap = {
             'btn-esc': '\\x1b',
             'btn-enter': '\\r',
+            'btn-newline': '\\x1b\\r',
             'btn-up': '\\x1b[A',
             'btn-down': '\\x1b[B',
             'btn-left': '\\x1b[D',
@@ -458,40 +451,7 @@ INJECT_JS = """<script>
             });
         }
         
-        // Multi-line input (inline bar)
-        var mlBar = document.getElementById('ml-bar');
-        var mlInput = document.getElementById('ml-input');
-        var mlSend = document.getElementById('ml-send');
-        var mlCancel = document.getElementById('ml-cancel');
-        var btnMultiline = document.getElementById('btn-multiline');
-        
-        if (btnMultiline && mlBar) {
-            btnMultiline.addEventListener('click', function() {
-                if (mlBar.style.display === 'none') {
-                    mlBar.style.display = 'block';
-                    mlInput.value = '';
-                    mlInput.focus();
-                } else {
-                    mlBar.style.display = 'none';
-                }
-            });
-        }
-        if (mlCancel && mlBar) {
-            mlCancel.addEventListener('click', function() {
-                mlBar.style.display = 'none';
-            });
-        }
-        if (mlSend && mlInput) {
-            mlSend.addEventListener('click', function() {
-                var text = mlInput.value;
-                if (text) {
-                    // Send entire text as one block (preserving newlines)
-                    window.__wsSend(text + String.fromCharCode(13));
-                    flash('已发送');
-                }
-                mlBar.style.display = 'none';
-            });
-        }
+
         
         console.log('[Hermes] Button bindings initialized');
     }
