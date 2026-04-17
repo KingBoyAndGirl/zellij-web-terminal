@@ -371,6 +371,8 @@ INJECT_HTML = """<div id="toolbar">
         <button class="btn" id="btn-down">↓</button>
         <button class="btn" id="btn-left">←</button>
         <button class="btn" id="btn-right">→</button>
+        <button class="btn" id="btn-backspace">⌫</button>
+        <button class="btn" id="btn-delete">⌦</button>
         <button class="btn gn" id="btn-paste">粘贴</button>
         <button class="btn rd" id="btn-ctrlc">^C</button>
     </div>
@@ -392,31 +394,6 @@ INJECT_HTML = """<div id="toolbar">
     <div class="panel-title">TAB 编辑</div>
     <div class="row">
         <button class="btn" id="btn-tab">TAB</button>
-        <button class="btn" id="btn-backspace">⌫</button>
-        <button class="btn" id="btn-delete">⌦</button>
-        <button class="btn" id="btn-home">↖</button>
-        <button class="btn" id="btn-end">↘</button>
-    </div>
-    <div class="row">
-        <button class="btn bl" id="btn-copy">📋 复制</button>
-        <button class="btn bl" id="btn-paste2">📌 粘贴</button>
-    </div>
-    <div class="row">
-        <button class="btn" id="btn-ctrla">^A 行首</button>
-        <button class="btn" id="btn-ctrle">^E 行尾</button>
-        <button class="btn" id="btn-ctrlu">^U 删行</button>
-        <button class="btn" id="btn-ctrlk">^K 删尾</button>
-        <button class="btn" id="btn-ctrlw">^W 删词</button>
-    </div>
-    <div class="row">
-        <button class="btn gn" id="btn-save">💾 :wq!</button>
-        <button class="btn rd" id="btn-quitvim">❌ :q!</button>
-        <button class="btn yl" id="btn-search">🔍 搜索</button>
-        <button class="btn" id="btn-search-prev">◀ 上一个</button>
-        <button class="btn" id="btn-search-next">▶ 下一个</button>
-    </div>
-    <div class="row">
-        <button class="btn" id="btn-vsplit">↓分屏</button>
     </div>
 </div>
 
