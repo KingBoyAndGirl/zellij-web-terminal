@@ -12,10 +12,55 @@ ZELLIJ = "127.0.0.1"
 ZELLIJ_PORT = 18084
 LISTEN_PORT = 18082
 # Auto-login token (created via: zellij web --create-token)
-AUTO_TOKEN = "f48eed44-0fbe-4eba-a966-5ccaee873bc9"
+AUTO_TOKEN="72213dca-2113-4e81-b68b-0415ea2edd38"
 CERT = "/home/devbox/.config/zellij/cert.pem"
 KEY = "/home/devbox/.config/zellij/key.pem"
 WEB_DIR = "/home/devbox/.config/zellij/web"
+TAB_STATE_FILE = os.path.join(WEB_DIR, "tab_state.json")
+
+# ── Tab state management (shared across all devices) ──
+import threading
+
+_tab_lock = threading.Lock()
+
+def read_tab_state() -> dict:
+    """Read tab state from file. Returns {count, active, names, ts}."""
+    try:
+        with open(TAB_STATE_FILE, "r") as f:
+            state = json.load(f)
+        # Ensure names array exists
+        if "names" not in state:
+            state["names"] = [f"Tab {i+1}" for i in range(state.get("count", 1))]
+        return state
+    except (FileNotFoundError, json.JSONDecodeError):
+        return {"count": 1, "active": 0, "names": ["Tab 1"], "ts": 0}
+
+def write_tab_state(count: int, active: int, names: list = None) -> dict:
+    """Write tab state to file and return it."""
+    import time
+    count = max(1, count)
+    active = max(0, min(active, count - 1))
+    if names is None:
+        # Preserve existing names or generate defaults
+        old = read_tab_state()
+        old_names = old.get("names", [])
+        names = []
+        for i in range(count):
+            if i < len(old_names):
+                names.append(old_names[i])
+            else:
+                names.append(f"Tab {i+1}")
+    else:
+        names = names[:count] + [f"Tab {i+1}" for i in range(max(0, count - len(names)))]
+    state = {"count": count, "active": active, "names": names, "ts": time.time()}
+    with _tab_lock:
+        with open(TAB_STATE_FILE, "w") as f:
+            json.dump(state, f)
+    return state
+
+# Initialize tab state file
+if not os.path.exists(TAB_STATE_FILE):
+    write_tab_state(1, 0)
 
 # Load custom HTML template (optional, we may not need it)
 try:
@@ -33,22 +78,93 @@ INJECT_CSS = """<style>
     background: #0d1117;
     border-bottom: 1px solid #333;
     display: flex;
-    align-items: center;
-    padding: 0 4px;
-    gap: 3px;
+    align-items: flex-end;
+    padding: 0 0 0 4px;
     z-index: 999;
+    overflow-x: auto;
+    overflow-y: hidden;
 }
-#tab-bar .tab-btn {
-    flex: 0 0 auto;
-    height: 28px;
-    min-width: 0;
-    padding: 0 10px;
-    border: 1px solid #444;
-    border-radius: 4px;
-    background: #1a1f2e;
-    color: #98c379;
+#tab-bar::-webkit-scrollbar { display: none; }
+#tab-list {
+    display: flex;
+    align-items: flex-end;
+    flex: 1;
+    overflow-x: auto;
+    overflow-y: hidden;
+    gap: 1px;
+    height: 100%;
+}
+#tab-list::-webkit-scrollbar { display: none; }
+#tab-list .tab-item {
+    flex: 0 1 160px;
+    min-width: 80px;
+    max-width: 160px;
+    height: 30px;
+    display: flex;
+    align-items: center;
+    padding: 0 6px 0 12px;
+    background: #1c2028;
+    border: 1px solid #333;
+    border-bottom: none;
+    border-radius: 6px 6px 0 0;
+    cursor: pointer;
+    user-select: none;
+    -webkit-user-select: none;
+    -webkit-tap-highlight-color: transparent;
+    transition: background 0.15s;
+    position: relative;
+    top: 1px;
+}
+#tab-list .tab-item:hover { background: #252b36; }
+#tab-list .tab-item.active {
+    background: #0d1117;
+    border-color: #61afef;
+    border-bottom: 1px solid #0d1117;
+    z-index: 1;
+}
+#tab-list .tab-item .tab-name {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
     font-size: 12px;
-    font-weight: 500;
+    color: #8b949e;
+    line-height: 1;
+}
+#tab-list .tab-item.active .tab-name { color: #e6edf3; font-weight: 500; }
+#tab-list .tab-item .tab-close {
+    flex: 0 0 16px;
+    width: 16px;
+    height: 16px;
+    margin-left: 4px;
+    border: none;
+    border-radius: 3px;
+    background: transparent;
+    color: #484f58;
+    font-size: 14px;
+    line-height: 16px;
+    text-align: center;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    opacity: 0;
+    transition: opacity 0.15s, background 0.15s;
+}
+#tab-list .tab-item:hover .tab-close { opacity: 1; }
+#tab-list .tab-item.active .tab-close { opacity: 1; color: #8b949e; }
+#tab-list .tab-item .tab-close:hover { background: #333; color: #f85149; }
+.tab-btn-new {
+    flex: 0 0 28px;
+    width: 28px;
+    height: 28px;
+    margin: auto 4px 2px 4px;
+    border: 1px solid #333;
+    border-radius: 6px;
+    background: transparent;
+    color: #484f58;
+    font-size: 18px;
     cursor: pointer;
     display: flex;
     align-items: center;
@@ -56,30 +172,10 @@ INJECT_CSS = """<style>
     user-select: none;
     -webkit-user-select: none;
     -webkit-tap-highlight-color: transparent;
-    white-space: nowrap;
+    transition: background 0.15s, color 0.15s;
 }
-#tab-bar .tab-btn:active { background: #555; color: #fff; }
-#tab-bar .tab-btn.active {
-    background: #1a3a5c;
-    border-color: #61afef;
-    color: #61afef;
-    font-weight: 600;
-}
-#tab-bar .tab-btn:disabled {
-    opacity: 0.9;
-    cursor: default;
-    background: #0d1117;
-    border-color: #333;
-    color: #8b949e;
-    flex: 0 0 auto;
-    padding: 0 14px;
-}
-#tab-bar .tab-sep {
-    width: 1px;
-    height: 20px;
-    background: #333;
-    margin: 0 2px;
-}
+.tab-btn-new:hover { background: #252b36; color: #8b949e; }
+.tab-btn-new:active { background: #333; color: #e6edf3; }
 #term-wrap {
     position: absolute;
     top: 37px; left: 0; right: 0;
@@ -279,11 +375,8 @@ INJECT_HTML = """<div id="toolbar">
 </div>
 
 <div id="tab-bar">
-    <button class="tab-btn active" id="btn-newtab2">+ New Tab</button>
-    <div class="tab-sep"></div>
-    <button class="tab-btn" id="btn-tab-prev">◀</button>
-    <button class="tab-btn" id="btn-tab-indicator" disabled>Tab 1/1</button>
-    <button class="tab-btn" id="btn-tab-next">▶</button>
+    <div id="tab-list"></div>
+    <button class="tab-btn-new" id="btn-newtab2">+</button>
 </div>
 
 <div class="panel" id="panel-edit">
@@ -390,7 +483,6 @@ INJECT_JS = """<script>
             'btn-save': '\\x1b:wq!\\r',    // ESC + :wq!
             'btn-quitvim': '\\x1b:q!\\r',    // ESC + :q!
             'btn-ctrlc': '\\x03',
-            'btn-close': '\\x1bx',
             'btn-hsplit': '\\x1bh',
             'btn-vsplit': '\\x1bv',
             'btn-fullscreen': '\\x1bf',
@@ -426,85 +518,122 @@ INJECT_JS = """<script>
             }
         }
 
-        // ── Tab state tracking (best-effort, button-driven) ──
-        var tabState = { current: 1, total: 1 };
-        var tabIndicator = document.getElementById('btn-tab-indicator');
+        // ── Browser-like Tab UI: dynamic tabs with close buttons ──
+        var tabState = { count: 1, active: 0, ts: 0, names: [] };
+        var tabList = document.getElementById('tab-list');
+        var TAB_API = '/api/tabs';
 
-        function updateTabIndicator() {
-            if (tabIndicator) {
-                tabIndicator.textContent = 'Tab ' + tabState.current + '/' + tabState.total;
-            }
-        }
+        function renderTabs() {
+            if (!tabList) return;
+            tabList.innerHTML = '';
+            for (var i = 0; i < tabState.count; i++) {
+                (function(idx) {
+                    var item = document.createElement('div');
+                    item.className = 'tab-item' + (idx === tabState.active ? ' active' : '');
 
-        // Recover tab state from terminal buffer after page load
-        function recoverTabState() {
-            try {
-                var maxLine = term.buffer.active.length;
-                var tabNums = [];
-                var activeTab = 1;
-                // Zellij tab bar is at the TOP of terminal, scan first 15 lines
-                var scanEnd = Math.min(15, maxLine);
-                console.log('[Tab] Scanning buffer lines 0 -', scanEnd);
-                for (var row = 0; row < scanEnd; row++) {
-                    var line = term.buffer.active.getLine(row);
-                    if (!line) continue;
-                    var text = line.translateToString(0, line.length);
-                    if (text.trim().length > 0) {
-                        console.log('[Tab] Line', row, ':', JSON.stringify(text));
-                    }
-                    // Match patterns like " Tab #1 ", "Tab #2 ", " Tab #3  "
-                    var matches = text.match(/Tab\s*#(\d+)/g);
-                    if (matches && matches.length > 0) {
-                        for (var i = 0; i < matches.length; i++) {
-                            var num = parseInt(matches[i].match(/(\d+)$/)[1]);
-                            if (num > 0 && tabNums.indexOf(num) === -1) tabNums.push(num);
+                    var name = document.createElement('span');
+                    name.className = 'tab-name';
+                    name.textContent = tabState.names[idx] || ('Tab ' + (idx + 1));
+
+                    var close = document.createElement('button');
+                    close.className = 'tab-close';
+                    close.textContent = '×';
+
+                    item.appendChild(name);
+                    item.appendChild(close);
+
+                    // Click tab to switch
+                    item.addEventListener('pointerdown', function(e) {
+                        console.log('[Tab Debug] Tab item clicked for idx:', idx, 'target:', e.target.tagName, 'target===close:', e.target === close, 'active:', tabState.active);
+                        if (e.target === close) return; // don't switch when clicking close
+                        e.preventDefault();
+                        var now = Date.now();
+                        if (now - (window.__btnDebounce['tabclick'] || 0) < 200) return;
+                        window.__btnDebounce['tabclick'] = now;
+                        if (idx !== tabState.active) {
+                            switchToTab(idx);
                         }
-                        // Active tab detection: look for the one without trailing space/padding pattern
-                        // Zellij renders active tab differently (inverted/colored)
-                        // We can detect by checking if the text around "Tab #N" has different attributes
-                        for (var col = 0; col < line.length; col++) {
-                            var cell = line.getCell(col);
-                            if (!cell) continue;
-                            var ch = cell.getChars();
-                            if (ch === '#') {
-                                var nextChar = col + 1 < line.length ? line.getCell(col + 1).getChars() : '';
-                                var n = parseInt(nextChar);
-                                if (n > 0) {
-                                    // Check if cell has inverted colors (active tab indicator)
-                                    var fg = cell.getFgColor();
-                                    var bg = cell.getBgColor();
-                                    if (bg !== undefined && bg !== 0 && bg !== 256) {
-                                        activeTab = n;
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-                if (tabNums.length > 0) {
-                    tabNums.sort(function(a, b) { return a - b; });
-                    tabState.total = tabNums[tabNums.length - 1];  // highest tab number
-                    tabState.current = activeTab;
-                    updateTabIndicator();
-                    console.log('[Tab] Recovered from buffer:', tabState.current + '/' + tabState.total);
-                } else {
-                    console.log('[Tab] No Tab# pattern found, keeping 1/1');
-                }
-            } catch(e) {
-                console.log('[Tab] Recovery failed:', e.message);
+                    });
+
+                    // Click × to close
+                    close.addEventListener('pointerdown', function(e) {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        console.log('[Tab Debug] Close button clicked for idx:', idx, 'active:', tabState.active, 'count:', tabState.count);
+                        var now = Date.now();
+                        if (now - (window.__btnDebounce['tabclose' + idx] || 0) < 300) return;
+                        window.__btnDebounce['tabclose' + idx] = now;
+                        closeTab(idx);
+                    });
+
+                    tabList.appendChild(item);
+                })(i);
             }
+            // Scroll active tab into view
+            var activeEl = tabList.querySelector('.tab-item.active');
+            if (activeEl) activeEl.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' });
         }
 
-        // Scan buffer after zellij has rendered (1s delay for initial paint)
-        setTimeout(recoverTabState, 1000);
-
-        function sendTabCmd(data) {
-            if (typeof window.__wsSend === 'function') {
-                window.__wsSend(data);
+        function switchToTab(idx) {
+            var diff = idx - tabState.active;
+            if (diff > 0) {
+                for (var i = 0; i < diff; i++) window.__wsSend('\x1b[1;3C'); // Alt+Right
+            } else if (diff < 0) {
+                for (var j = 0; j < -diff; j++) window.__wsSend('\x1b[1;3D'); // Alt+Left
             }
+            tabState.active = idx;
+            renderTabs();
+            saveTabState();
+            console.log('[Tab] Switch to:', idx + 1);
         }
 
-        // +新Tab: Alt+n
+        function closeTab(idx) {
+            if (tabState.count <= 1) return; // don't close last tab
+            // Switch to target tab first if not active
+            if (idx !== tabState.active) {
+                switchToTab(idx);
+            }
+            // Send Alt+x to close current tab
+            window.__wsSend('\x1bx');
+            tabState.names.splice(idx, 1);
+            tabState.count--;
+            if (tabState.active >= tabState.count) {
+                tabState.active = tabState.count - 1;
+            }
+            renderTabs();
+            saveTabState();
+            console.log('[Tab] Close:', idx + 1, 'now:', tabState.active + 1 + '/' + tabState.count);
+        }
+
+        // Save tab state to server
+        function saveTabState() {
+            fetch(TAB_API, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({count: tabState.count, active: tabState.active, names: tabState.names})
+            }).then(function(r){ return r.json(); }).then(function(s){
+                tabState.ts = s.ts;
+                console.log('[Tab] Saved:', tabState.active+1 + '/' + tabState.count);
+            }).catch(function(e){ console.warn('[Tab] Save failed:', e); });
+        }
+
+        // Poll server for tab state changes
+        function pollTabState() {
+            fetch(TAB_API).then(function(r){ return r.json(); }).then(function(s){
+                if (s.ts && s.ts !== tabState.ts) {
+                    tabState.count = s.count;
+                    tabState.active = s.active;
+                    tabState.ts = s.ts;
+                    if (s.names) tabState.names = s.names;
+                    renderTabs();
+                    console.log('[Tab] Synced:', tabState.active+1 + '/' + tabState.count);
+                }
+            }).catch(function(){});
+        }
+
+        setInterval(pollTabState, 600);
+
+        // + button: create new tab
         var btnNewTab2 = document.getElementById('btn-newtab2');
         if (btnNewTab2) {
             btnNewTab2.addEventListener('pointerdown', function(e) {
@@ -512,85 +641,57 @@ INJECT_JS = """<script>
                 var now = Date.now();
                 if (now - (window.__btnDebounce['newtab2'] || 0) < 300) return;
                 window.__btnDebounce['newtab2'] = now;
-                tabState.total++;
-                tabState.current = tabState.total;
-                sendTabCmd('\\x1bn');
-                updateTabIndicator();
-                console.log('[Tab] New tab ->', tabState.current + '/' + tabState.total);
-            });
-        }
-
-        // ◀ Tab prev: Alt+Left (clamp at tab 1, no wrap)
-        var btnTabPrev = document.getElementById('btn-tab-prev');
-        if (btnTabPrev) {
-            btnTabPrev.addEventListener('pointerdown', function(e) {
-                e.preventDefault();
-                var now = Date.now();
-                if (now - (window.__btnDebounce['tabprev'] || 0) < 300) return;
-                window.__btnDebounce['tabprev'] = now;
-                if (tabState.current <= 1) {
-                    console.log('[Tab] Already at tab 1, skip');
-                    return;
+                window.__wsSend('\x1bn');
+                // Generate unique name
+                var newName = 'Tab ' + (tabState.count + 1);
+                var counter = 1;
+                while (tabState.names.includes(newName)) {
+                    counter++;
+                    newName = 'Tab ' + (tabState.count + 1) + ' (' + counter + ')';
                 }
-                tabState.current--;
-                sendTabCmd('\\x1b[1;3D');  // Alt+Left
-                updateTabIndicator();
-                console.log('[Tab] Prev ->', tabState.current + '/' + tabState.total);
+                tabState.names.push(newName);
+                tabState.count++;
+                tabState.active = tabState.count - 1;
+                renderTabs();
+                saveTabState();
+                console.log('[Tab] New:', tabState.active+1 + '/' + tabState.count);
             });
         }
 
-        // ▶ Tab next: Alt+Right (clamp at last tab, no wrap)
-        var btnTabNext = document.getElementById('btn-tab-next');
-        if (btnTabNext) {
-            btnTabNext.addEventListener('pointerdown', function(e) {
-                e.preventDefault();
-                var now = Date.now();
-                if (now - (window.__btnDebounce['tabnext'] || 0) < 300) return;
-                window.__btnDebounce['tabnext'] = now;
-                if (tabState.current >= tabState.total) {
-                    console.log('[Tab] Already at last tab, skip');
-                    return;
+        // Keyboard shortcuts for tab tracking
+        document.addEventListener('keydown', function(e) {
+            if (e.altKey && e.key === 'n') {
+                tabState.names.push('Tab ' + (tabState.count + 1));
+                tabState.count++;
+                tabState.active = tabState.count - 1;
+                renderTabs();
+                saveTabState();
+            }
+            if (e.altKey && e.key === 'x') {
+                if (tabState.count > 1) {
+                    tabState.names.splice(tabState.active, 1);
+                    tabState.count--;
+                    if (tabState.active >= tabState.count) tabState.active = tabState.count - 1;
                 }
-                tabState.current++;
-                sendTabCmd('\\x1b[1;3C');  // Alt+Right
-                updateTabIndicator();
-                console.log('[Tab] Next ->', tabState.current + '/' + tabState.total);
-            });
-        }
+                renderTabs();
+                saveTabState();
+            }
+            if (e.altKey && e.key === 'ArrowLeft') {
+                tabState.active = tabState.active > 0 ? tabState.active - 1 : tabState.count - 1;
+                renderTabs();
+                saveTabState();
+            }
+            if (e.altKey && e.key === 'ArrowRight') {
+                tabState.active = tabState.active < tabState.count - 1 ? tabState.active + 1 : 0;
+                renderTabs();
+                saveTabState();
+            }
+        });
 
-        // Close tab: update counter (intercept from keyMap binding)
-        var origClose = document.getElementById('btn-close');
-        if (origClose) {
-            origClose.addEventListener('pointerdown', function() {
-                setTimeout(function() {
-                    if (tabState.total > 1) {
-                        tabState.total--;
-                        if (tabState.current > tabState.total) {
-                            tabState.current = tabState.total;
-                        }
-                        updateTabIndicator();
-                        console.log('[Tab] Close ->', tabState.current + '/' + tabState.total);
-                    }
-                }, 50);
-            }, true);  // capture phase, runs before keyMap handler
-        }
-
-        // Alt+number direct jump: update counter if user uses keyboard
-        // We detect this via the term.onData for escaped sequences
-        if (term && term.onData) {
-            term.onData(function(data) {
-                // Detect Alt+1 through Alt+9 from keyboard
-                if (data.length === 2 && data.charCodeAt(0) === 0x1b) {
-                    var n = parseInt(data[1]);
-                    if (n >= 1 && n <= 9) {
-                        if (n > tabState.total) tabState.total = n;
-                        tabState.current = n;
-                        updateTabIndicator();
-                        console.log('[Tab] Jump to Alt+' + n + ' ->', tabState.current + '/' + tabState.total);
-                    }
-                }
-            });
-        }
+        // Initial load
+        pollTabState();
+        renderTabs();
+        
 
         // Panel toggles
         var editPanel = document.getElementById('panel-edit');
@@ -972,6 +1073,38 @@ async def handle_client(reader, writer):
 
         if method == "POST" and path == "/session":
             await handle_auto_session(reader, writer, header_text)
+            return
+
+        # Tab state API (shared across all devices)
+        if path == "/api/tabs" and method == "GET":
+            state = read_tab_state()
+            body = json.dumps(state).encode()
+            writer.write(b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: " + str(len(body)).encode() + b"\r\n\r\n" + body)
+            await writer.drain()
+            writer.close()
+            return
+
+        if path == "/api/tabs" and method == "POST":
+            # Read body
+            cl = int(headers.get("content-length", 0))
+            if cl > 0 and cl < 4096:
+                body = await asyncio.wait_for(reader.readexactly(cl), timeout=5)
+                try:
+                    data = json.loads(body)
+                    count = int(data.get("count", 1))
+                    active = int(data.get("active", 0))
+                    names = data.get("names", None)
+                    if names is not None and not isinstance(names, list):
+                        names = None
+                    state = write_tab_state(count, active, names)
+                    resp = json.dumps(state).encode()
+                    writer.write(b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: " + str(len(resp)).encode() + b"\r\n\r\n" + resp)
+                except (json.JSONDecodeError, ValueError):
+                    writer.write(b"HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\n\r\n")
+            else:
+                writer.write(b"HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\n\r\n")
+            await writer.drain()
+            writer.close()
             return
 
         if path == "/" and method == "GET" and not is_ws:
