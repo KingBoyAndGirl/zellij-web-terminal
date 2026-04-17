@@ -163,55 +163,27 @@ INJECT_WS_INTERCEPT = """<script>
         return false;
     };
     
-    // IME Composition handlers - enhanced to block xterm.js input handling
-    var _imeInputHandler = null;
+    // Server-side PR #5034 fix handles parse_stdin correctly (per-character consumption),
+    // so no client-side IME intervention is needed. Let xterm.js handle composition normally.
+    var _imeComposing = false;
     document.addEventListener('compositionstart', function() {
-        window.__imeComposing = true;
+        _imeComposing = true;
         console.log('[IME] compositionstart');
-        // Add input event listener to block xterm.js from reading textarea during composition
-        _imeInputHandler = function(e) {
-            if (window.__imeComposing) {
-                // Block xterm.js from processing input events during IME composition
-                e.stopImmediatePropagation();
-                e.stopPropagation();
-                e.preventDefault();
-                // Clear textarea to prevent any pending reads
-                var ta = document.querySelector('.xterm-helper-textarea');
-                if (ta) { ta.value = ''; }
-                console.log('[IME] Blocked input event during composition');
-            }
-        };
-        document.addEventListener('input', _imeInputHandler, true);
+    }, true);
+    document.addEventListener('compositionend', function(e) {
+        _imeComposing = false;
+        console.log('[IME] compositionend, data:', e.data);
     }, true);
     
-    document.addEventListener('compositionend', function(e) {
-        var ta = document.querySelector('.xterm-helper-textarea');
-        var finalText = e.data || '';
-        if (!finalText && ta && ta.value) {
-            finalText = ta.value;
+    // Dedup wrapper: prevent ws.send duplicate during compositionend
+    var _origSend = WebSocket.prototype.send;
+    WebSocket.prototype.send = function(data) {
+        if (typeof data === 'string' && _imeComposing) {
+            console.log('[IME] Blocked duplicate ws.send during composition:', data);
+            return;
         }
-        console.log('[IME] compositionend, text:', finalText);
-        // Clear textarea IMMEDIATELY to prevent xterm.js from reading it
-        if (ta) { ta.value = ''; }
-        // Reset composing flag BEFORE sending (so our ws.send wrapper allows it)
-        window.__imeComposing = false;
-        // Remove input event listener
-        if (_imeInputHandler) {
-            document.removeEventListener('input', _imeInputHandler, true);
-            _imeInputHandler = null;
-        }
-        // Send composed text via ws.send (our prototype wrapper handles dedup)
-        if (finalText.length > 0) {
-            var ws = window._termWs;
-            if (ws && ws.readyState === WebSocket.OPEN) {
-                ws.send(finalText);
-                console.log('[IME] SENT via ws.send:', Array.from(finalText).map(function(c){return 'U+'+c.charCodeAt(0).toString(16).padStart(4,'0')}).join(' '));
-            }
-        }
-        // Block xterm.js from processing this event
-        e.stopImmediatePropagation();
-        e.preventDefault();
-    }, true);
+        return _origSend.apply(this, arguments);
+    };
     
 })();
 </script>"""
@@ -332,38 +304,9 @@ INJECT_JS = """<script>
     }, 5000);
 
     function init() {
-        // Patch xterm.js CompositionHelper to prevent duplicate IME input
-        // Strategy: Keep the real object (so updateCompositionElements/keydown work),
-        // but override compositionend to prevent it from sending composed text.
-        // Our own document-level compositionend handler handles sending instead.
-        if (term && term._core && term._core._compositionHelper) {
-            var _ch = term._core._compositionHelper;
-            console.log('[IME] Patching CompositionHelper compositionend');
-            // Save original for reference
-            _ch._originalCompositionEnd = _ch.compositionend;
-            // Override: clear composition state but DON'T send data
-            _ch.compositionend = function(e) {
-                console.log('[IME] CompositionHelper.compositionend intercepted');
-                // Clear the textarea to prevent stale data
-                if (this._textarea && this._textarea.value) {
-                    this._textarea.value = '';
-                }
-                // Reset composing state if the object tracks it
-                if ('_isComposing' in this) this._isComposing = false;
-                if ('isComposing' in this && typeof this._isComposing !== 'undefined') {
-                    this._isComposing = false;
-                }
-                // Do NOT call _finalizeComposition or triggerDataEvent
-                // Our document-level handler will send the text via ws.send
-            };
-            // Also patch clearComposition if it could send data
-            if (typeof _ch._finalizeComposition === 'function') {
-                _ch._finalizeComposition = function() {
-                    console.log('[IME] CompositionHelper._finalizeComposition blocked');
-                };
-            }
-            console.log('[IME] CompositionHelper patched successfully');
-        }
+        // Server-side PR #5034 fix: parse_stdin now consumes per-character, so no IME duplication.
+        // Let xterm.js CompositionHelper work normally - no client-side intervention needed.
+        console.log('[IME] Server-side fix active, xterm.js will handle composition normally');
 
         // Button mappings - ESC sequences
         var keyMap = {
