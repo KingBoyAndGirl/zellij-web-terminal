@@ -98,7 +98,12 @@ log_info "证书已生成"
 
 # 5. 生成登录 Token
 log_step "生成登录 Token..."
-TOKEN=$("$BIN_DIR/zellij" web --create-token 2>/dev/null || cat /proc/sys/kernel/random/uuid)
+TOKEN_OUTPUT=$("$BIN_DIR/zellij" web --create-token 2>/dev/null || echo "token: $(cat /proc/sys/kernel/random/uuid)")
+# 提取 token 值（格式：token_N: xxx-xxx-xxx）
+TOKEN=$(echo "$TOKEN_OUTPUT" | grep -oP 'token_\d+:\s*\K[a-f0-9-]+' || echo "$TOKEN_OUTPUT" | tail -1 | grep -oP '[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}')
+if [ -z "$TOKEN" ]; then
+    TOKEN=$(cat /proc/sys/kernel/random/uuid)
+fi
 echo "$TOKEN" > "$CONFIG_DIR/auth_token.txt"
 log_info "Token: $TOKEN"
 
