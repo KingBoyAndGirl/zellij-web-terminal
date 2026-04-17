@@ -367,8 +367,8 @@ INJECT_HTML = """<div id="toolbar">
         <button class="btn" id="btn-newline">↩ 换行</button>
         <button class="btn bl" id="btn-edit">TAB</button>
         <button class="btn rd" id="btn-close">关闭</button>
-        <button class="btn" id="btn-hsplit">←水平</button>
-        <button class="btn" id="btn-vsplit">↓垂直</button>
+        <button class="btn" id="btn-hsplit">←水平分屏</button>
+        <button class="btn" id="btn-vsplit">↓垂直分屏</button>
         <button class="btn yl" id="btn-fullscreen">全屏</button>
     </div>
     <div class="row">
