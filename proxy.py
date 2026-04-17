@@ -256,7 +256,6 @@ INJECT_HTML = """<div id="toolbar">
 <div class="panel" id="panel-zellij">
     <div class="panel-title">Zellij 操作</div>
     <div class="row">
-        <button class="btn bl" id="btn-newtab">新Tab</button>
         <button class="btn rd" id="btn-close">关闭</button>
         <button class="btn" id="btn-hsplit">←分屏</button>
         <button class="btn" id="btn-vsplit">↓分屏</button>
@@ -336,7 +335,6 @@ INJECT_JS = """<script>
             'btn-save': '\\x1b:wq!\\r',    // ESC + :wq!
             'btn-quitvim': '\\x1b:q!\\r',    // ESC + :q!
             'btn-ctrlc': '\\x03',
-            'btn-newtab': '\\x1bn',
             'btn-close': '\\x1bx',
             'btn-hsplit': '\\x1bh',
             'btn-vsplit': '\\x1bv',
@@ -457,19 +455,6 @@ INJECT_JS = """<script>
                     }
                 }, 50);
             }, true);  // capture phase, runs before keyMap handler
-        }
-
-        // Old "新Tab" button: also update counter
-        var origNewTab = document.getElementById('btn-newtab');
-        if (origNewTab) {
-            origNewTab.addEventListener('pointerdown', function() {
-                setTimeout(function() {
-                    tabState.total++;
-                    tabState.current = tabState.total;
-                    updateTabIndicator();
-                    console.log('[Tab] New(old) ->', tabState.current + '/' + tabState.total);
-                }, 50);
-            }, true);
         }
 
         // Alt+number direct jump: update counter if user uses keyboard
