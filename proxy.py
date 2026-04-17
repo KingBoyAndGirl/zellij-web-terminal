@@ -183,7 +183,7 @@ INJECT_CSS = """<style>
 #term-wrap {
     position: absolute;
     top: 37px; left: 0; right: 0;
-    bottom: 128px;
+    bottom: 205px;
     background: #000;
 }
 #terminal {
@@ -366,6 +366,8 @@ INJECT_HTML = """<div id="toolbar">
         <button class="btn" id="btn-enter">Enter</button>
         <button class="btn" id="btn-newline">Newline</button>
         <button class="btn bl" id="btn-edit">TAB</button>
+    </div>
+    <div class="row">
         <button class="btn rd" id="btn-close">Close</button>
         <button class="btn" id="btn-hsplit">H-Split</button>
         <button class="btn" id="btn-vsplit">V-Split</button>
