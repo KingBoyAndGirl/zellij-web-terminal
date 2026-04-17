@@ -26,10 +26,64 @@ except:
 
 # CSS to inject
 INJECT_CSS = """<style>
+#tab-bar {
+    position: fixed;
+    top: 0; left: 0; right: 0;
+    height: 36px;
+    background: #0d1117;
+    border-bottom: 1px solid #333;
+    display: flex;
+    align-items: center;
+    padding: 0 4px;
+    gap: 3px;
+    z-index: 999;
+}
+#tab-bar .tab-btn {
+    flex: 0 0 auto;
+    height: 28px;
+    min-width: 0;
+    padding: 0 10px;
+    border: 1px solid #444;
+    border-radius: 4px;
+    background: #1a1f2e;
+    color: #98c379;
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    user-select: none;
+    -webkit-user-select: none;
+    -webkit-tap-highlight-color: transparent;
+    white-space: nowrap;
+}
+#tab-bar .tab-btn:active { background: #555; color: #fff; }
+#tab-bar .tab-btn.active {
+    background: #1a3a5c;
+    border-color: #61afef;
+    color: #61afef;
+    font-weight: 600;
+}
+#tab-bar .tab-btn:disabled {
+    opacity: 0.9;
+    cursor: default;
+    background: #0d1117;
+    border-color: #333;
+    color: #8b949e;
+    flex: 0 0 auto;
+    padding: 0 14px;
+}
+#tab-bar .tab-sep {
+    width: 1px;
+    height: 20px;
+    background: #333;
+    margin: 0 2px;
+}
 #term-wrap {
     position: absolute;
-    top: 0; left: 0; right: 0;
-    bottom: 90px;
+    top: 37px; left: 0; right: 0;
+    bottom: 86px;
     background: #000;
 }
 #terminal {
@@ -70,7 +124,7 @@ INJECT_CSS = """<style>
 .panel {
     display: none;
     position: fixed;
-    bottom: 90px; left: 0; right: 0;
+    bottom: 86px; left: 0; right: 0;
     background: #111; border-top: 1px solid #333;
     padding: 8px; z-index: 998;
     max-height: 50vh; overflow-y: auto;
@@ -224,6 +278,14 @@ INJECT_HTML = """<div id="toolbar">
     </div>
 </div>
 
+<div id="tab-bar">
+    <button class="tab-btn active" id="btn-newtab2">+ New Tab</button>
+    <div class="tab-sep"></div>
+    <button class="tab-btn" id="btn-tab-prev">◀</button>
+    <button class="tab-btn" id="btn-tab-indicator" disabled>Tab 1/1</button>
+    <button class="tab-btn" id="btn-tab-next">▶</button>
+</div>
+
 <div class="panel" id="panel-edit">
     <div class="panel-title">编辑</div>
     <div class="row">
@@ -264,13 +326,6 @@ INJECT_HTML = """<div id="toolbar">
     <div class="row">
         <button class="btn gn" id="btn-detach">断开</button>
         <button class="btn rd" id="btn-quit">退出</button>
-    </div>
-    <div class="panel-title">Tab 切换</div>
-    <div class="row">
-        <button class="btn bl" id="btn-newtab2">New Tab</button>
-        <button class="btn" id="btn-tab-prev">◀</button>
-        <button class="btn" id="btn-tab-indicator" disabled>Tab 1/1</button>
-        <button class="btn" id="btn-tab-next">▶</button>
     </div>
     <div class="panel-title">工具</div>
     <div class="row">
@@ -617,7 +672,7 @@ INJECT_JS = """<script>
             if (!el) {
                 el = document.createElement('div');
                 el.id = 'paste-area';
-                el.style.cssText = 'position:fixed;bottom:96px;left:8px;right:8px;z-index:9998;background:#222;border:1px solid #61afef;border-radius:8px;padding:8px;display:flex;gap:6px;align-items:flex-end;';
+                el.style.cssText = 'position:fixed;bottom:92px;left:8px;right:8px;z-index:9998;background:#222;border:1px solid #61afef;border-radius:8px;padding:8px;display:flex;gap:6px;align-items:flex-end;';
                 var ta = document.createElement('textarea');
                 ta.id = 'paste-area-input';
                 ta.style.cssText = 'flex:1;height:60px;background:#111;color:#ddd;border:1px solid #444;border-radius:5px;padding:6px;font-family:monospace;font-size:13px;resize:none;outline:none;';
@@ -700,7 +755,7 @@ INJECT_JS = """<script>
             window.visualViewport.addEventListener('resize', function() {
                 var termWrap = document.getElementById('term-wrap');
                 if (termWrap) {
-                    termWrap.style.height = (window.visualViewport.height - 90) + 'px';
+                    termWrap.style.height = (window.visualViewport.height - 123) + 'px';
                 }
             });
         }
