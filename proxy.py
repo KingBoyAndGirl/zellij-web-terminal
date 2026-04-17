@@ -387,10 +387,10 @@ INJECT_JS = """<script>
                 var maxLine = term.buffer.active.length;
                 var tabNums = [];
                 var activeTab = 1;
-                // Scan last 8 lines for zellij tab bar
-                var scanStart = Math.max(0, maxLine - 8);
-                console.log('[Tab] Scanning buffer lines', scanStart, '-', maxLine);
-                for (var row = scanStart; row < maxLine; row++) {
+                // Zellij tab bar is at the TOP of terminal, scan first 15 lines
+                var scanEnd = Math.min(15, maxLine);
+                console.log('[Tab] Scanning buffer lines 0 -', scanEnd);
+                for (var row = 0; row < scanEnd; row++) {
                     var line = term.buffer.active.getLine(row);
                     if (!line) continue;
                     var text = line.translateToString(0, line.length);
