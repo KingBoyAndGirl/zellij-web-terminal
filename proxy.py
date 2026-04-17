@@ -381,6 +381,61 @@ INJECT_JS = """<script>
             }
         }
 
+        // Recover tab state from terminal buffer after page load
+        function recoverTabState() {
+            try {
+                var maxLine = term.buffer.active.length;
+                var tabNums = [];
+                var activeTab = 1;
+                // Scan last 5 lines for zellij tab bar pattern
+                for (var row = Math.max(0, maxLine - 5); row < maxLine; row++) {
+                    var line = term.buffer.active.getLine(row);
+                    if (!line) continue;
+                    var text = line.translateToString(0, line.length);
+                    // Match patterns like " Tab #1 ", "Tab #2 ", " Tab #3  "
+                    var matches = text.match(/Tab\s*#(\d+)/g);
+                    if (matches && matches.length > 0) {
+                        for (var i = 0; i < matches.length; i++) {
+                            var num = parseInt(matches[i].match(/(\d+)$/)[1]);
+                            if (num > 0 && tabNums.indexOf(num) === -1) tabNums.push(num);
+                        }
+                        // Active tab detection: look for the one without trailing space/padding pattern
+                        // Zellij renders active tab differently (inverted/colored)
+                        // We can detect by checking if the text around "Tab #N" has different attributes
+                        for (var col = 0; col < line.length; col++) {
+                            var cell = line.getCell(col);
+                            if (!cell) continue;
+                            var ch = cell.getChars();
+                            if (ch === '#') {
+                                var nextChar = col + 1 < line.length ? line.getCell(col + 1).getChars() : '';
+                                var n = parseInt(nextChar);
+                                if (n > 0) {
+                                    // Check if cell has inverted colors (active tab indicator)
+                                    var fg = cell.getFgColor();
+                                    var bg = cell.getBgColor();
+                                    if (bg !== undefined && bg !== 0 && bg !== 256) {
+                                        activeTab = n;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                if (tabNums.length > 0) {
+                    tabNums.sort(function(a, b) { return a - b; });
+                    tabState.total = tabNums[tabNums.length - 1];  // highest tab number
+                    tabState.current = activeTab;
+                    updateTabIndicator();
+                    console.log('[Tab] Recovered from buffer:', tabState.current + '/' + tabState.total);
+                }
+            } catch(e) {
+                console.log('[Tab] Recovery failed:', e.message);
+            }
+        }
+
+        // Scan buffer after zellij has rendered (3s delay for initial paint)
+        setTimeout(recoverTabState, 3000);
+
         function sendTabCmd(data) {
             if (typeof window.__wsSend === 'function') {
                 window.__wsSend(data);
