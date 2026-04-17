@@ -112,3 +112,8 @@ MIT License
 
 - [Zellij](https://github.com/zellij-org/zellij) - 原始项目
 - [xterm.js](https://github.com/xtermjs/xterm.js) - Web 终端组件
+
+## v0.1.1 更新
+
+- ✅ 隐藏原生 Tab 栏和状态栏
+- ✅ 修改所有布局文件（default/compact/classic/strider）
