@@ -179,7 +179,7 @@ INJECT_CSS = """<style>
 #term-wrap {
     position: absolute;
     top: 37px; left: 0; right: 0;
-    bottom: 86px;
+    bottom: 128px;
     background: #000;
 }
 #terminal {
@@ -361,8 +361,10 @@ INJECT_HTML = """<div id="toolbar">
         <button class="btn" id="btn-esc">ESC</button>
         <button class="btn" id="btn-enter">↵ Enter</button>
         <button class="btn" id="btn-newline">↩ 换行</button>
-        <button class="btn bl" id="btn-edit">编辑</button>
-        <button class="btn pk" id="btn-zellij">操作</button>
+        <button class="btn bl" id="btn-edit">TAB</button>
+        <button class="btn rd" id="btn-close">关闭</button>
+        <button class="btn" id="btn-hsplit">←分屏</button>
+        <button class="btn yl" id="btn-fullscreen">全屏</button>
     </div>
     <div class="row">
         <button class="btn" id="btn-up">↑</button>
@@ -372,6 +374,13 @@ INJECT_HTML = """<div id="toolbar">
         <button class="btn gn" id="btn-paste">粘贴</button>
         <button class="btn rd" id="btn-ctrlc">^C</button>
     </div>
+    <div class="row">
+        <button class="btn" id="btn-clear">清屏</button>
+        <button class="btn" id="btn-gohome">回家</button>
+        <button class="btn" id="btn-history">历史</button>
+        <button class="btn gn" id="btn-detach">断开</button>
+        <button class="btn rd" id="btn-quit">退出</button>
+    </div>
 </div>
 
 <div id="tab-bar">
@@ -380,7 +389,7 @@ INJECT_HTML = """<div id="toolbar">
 </div>
 
 <div class="panel" id="panel-edit">
-    <div class="panel-title">编辑</div>
+    <div class="panel-title">TAB 编辑</div>
     <div class="row">
         <button class="btn" id="btn-tab">TAB</button>
         <button class="btn" id="btn-backspace">⌫</button>
@@ -406,25 +415,8 @@ INJECT_HTML = """<div id="toolbar">
         <button class="btn" id="btn-search-prev">◀ 上一个</button>
         <button class="btn" id="btn-search-next">▶ 下一个</button>
     </div>
-</div>
-
-<div class="panel" id="panel-zellij">
-    <div class="panel-title">Zellij 操作</div>
     <div class="row">
-        <button class="btn rd" id="btn-close">关闭</button>
-        <button class="btn" id="btn-hsplit">←分屏</button>
         <button class="btn" id="btn-vsplit">↓分屏</button>
-        <button class="btn yl" id="btn-fullscreen">全屏</button>
-    </div>
-    <div class="row">
-        <button class="btn gn" id="btn-detach">断开</button>
-        <button class="btn rd" id="btn-quit">退出</button>
-    </div>
-    <div class="panel-title">工具</div>
-    <div class="row">
-        <button class="btn" id="btn-clear">清屏</button>
-        <button class="btn" id="btn-gohome">回家</button>
-        <button class="btn" id="btn-history">历史</button>
     </div>
 </div>
 
@@ -694,25 +686,13 @@ INJECT_JS = """<script>
         
 
         // Panel toggles
+        // Panel toggle - TAB button opens edit panel
         var editPanel = document.getElementById('panel-edit');
-        var zellijPanel = document.getElementById('panel-zellij');
         var btnEdit = document.getElementById('btn-edit');
-        var btnZellij = document.getElementById('btn-zellij');
         
         if (btnEdit && editPanel) {
             btnEdit.addEventListener('click', function() {
                 editPanel.classList.toggle('open');
-                if (editPanel.classList.contains('open') && zellijPanel) {
-                    zellijPanel.classList.remove('open');
-                }
-            });
-        }
-        if (btnZellij && zellijPanel) {
-            btnZellij.addEventListener('click', function() {
-                zellijPanel.classList.toggle('open');
-                if (zellijPanel.classList.contains('open') && editPanel) {
-                    editPanel.classList.remove('open');
-                }
             });
         }
 
