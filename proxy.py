@@ -30,10 +30,10 @@ def read_tab_state() -> dict:
             state = json.load(f)
         # Ensure names array exists
         if "names" not in state:
-            state["names"] = [f"Tab {i+1}" for i in range(state.get("count", 1))]
+            state["names"] = ["王总"] * state.get("count", 1)
         return state
     except (FileNotFoundError, json.JSONDecodeError):
-        return {"count": 1, "active": 0, "names": ["Tab 1"], "ts": 0}
+        return {"count": 1, "active": 0, "names": ["王总"], "ts": 0}
 
 def write_tab_state(count: int, active: int, names: list = None) -> dict:
     """Write tab state to file and return it."""
@@ -49,9 +49,9 @@ def write_tab_state(count: int, active: int, names: list = None) -> dict:
             if i < len(old_names):
                 names.append(old_names[i])
             else:
-                names.append(f"Tab {i+1}")
+                names.append("王总")
     else:
-        names = names[:count] + [f"Tab {i+1}" for i in range(max(0, count - len(names)))]
+        names = names[:count] + ["王总"] * max(0, count - len(names))
     state = {"count": count, "active": active, "names": names, "ts": time.time()}
     with _tab_lock:
         with open(TAB_STATE_FILE, "w") as f:
@@ -363,7 +363,8 @@ INJECT_HTML = """<div id="toolbar">
         <button class="btn" id="btn-newline">↩ 换行</button>
         <button class="btn bl" id="btn-edit">TAB</button>
         <button class="btn rd" id="btn-close">关闭</button>
-        <button class="btn" id="btn-hsplit">←分屏</button>
+        <button class="btn" id="btn-hsplit">←水平</button>
+        <button class="btn" id="btn-vsplit">↓垂直</button>
         <button class="btn yl" id="btn-fullscreen">全屏</button>
     </div>
     <div class="row">
@@ -402,6 +403,9 @@ INJECT_HTML = """<div id="toolbar">
 # JavaScript to inject (button bindings and other logic)
 INJECT_JS = """<script>
 (function() {
+    // Default tab name (can be customized)
+    var DEFAULT_TAB_NAME = '王总';
+    
     // Wait for terminal to be ready
     var term = null;
     var checkInterval = setInterval(function() {
@@ -451,11 +455,12 @@ INJECT_JS = """<script>
             'btn-search-next': String.fromCharCode(19),  // Ctrl+S = next match
             'btn-save': '\\x1b:wq!\\r',    // ESC + :wq!
             'btn-quitvim': '\\x1b:q!\\r',    // ESC + :q!
-            'btn-ctrlc': '\\x03',
-            'btn-hsplit': '\\x1bh',
-            'btn-vsplit': '\\x1bv',
-            'btn-fullscreen': '\\x1bf',
-            'btn-detach': '\\x1bd',
+            'btn-ctrlc': '\\\\x03',
+            'btn-hsplit': '\\\\x1bh',
+            'btn-vsplit': '\\\\x1bv',
+            'btn-fullscreen': '\\\\x1bf',
+            'btn-close': '\\\\x1bx',
+            'btn-detach': '\\\\x1bd',
             'btn-quit': '\\x1bq',
             'btn-clear': 'clear\\n',
             'btn-gohome': 'cd ~\\n',
@@ -502,7 +507,7 @@ INJECT_JS = """<script>
 
                     var name = document.createElement('span');
                     name.className = 'tab-name';
-                    name.textContent = tabState.names[idx] || ('Tab ' + (idx + 1));
+                    name.textContent = tabState.names[idx] || DEFAULT_TAB_NAME;
 
                     var close = document.createElement('button');
                     close.className = 'tab-close';
@@ -610,15 +615,9 @@ INJECT_JS = """<script>
                 var now = Date.now();
                 if (now - (window.__btnDebounce['newtab2'] || 0) < 300) return;
                 window.__btnDebounce['newtab2'] = now;
-                window.__wsSend('\x1bn');
-                // Generate unique name
-                var newName = 'Tab ' + (tabState.count + 1);
-                var counter = 1;
-                while (tabState.names.includes(newName)) {
-                    counter++;
-                    newName = 'Tab ' + (tabState.count + 1) + ' (' + counter + ')';
-                }
-                tabState.names.push(newName);
+                window.__wsSend('\\x1bn');
+                // Use default name without counter
+                tabState.names.push(DEFAULT_TAB_NAME);
                 tabState.count++;
                 tabState.active = tabState.count - 1;
                 renderTabs();
@@ -630,7 +629,7 @@ INJECT_JS = """<script>
         // Keyboard shortcuts for tab tracking
         document.addEventListener('keydown', function(e) {
             if (e.altKey && e.key === 'n') {
-                tabState.names.push('Tab ' + (tabState.count + 1));
+                tabState.names.push(DEFAULT_TAB_NAME);
                 tabState.count++;
                 tabState.active = tabState.count - 1;
                 renderTabs();
