@@ -2,7 +2,7 @@
 set -e
 
 # ============================================
-# Zellij Web Terminal - 一键安装脚本
+# Zellij Web Terminal - 全自动安装脚本
 # 用法: curl -fsSL https://raw.githubusercontent.com/KingBoyAndGirl/zellij-web-terminal/main/setup.sh | bash
 # ============================================
 
@@ -22,9 +22,7 @@ GITHUB_RAW="https://raw.githubusercontent.com/$GITHUB_REPO/main"
 
 echo ""
 echo -e "${BLUE}╔════════════════════════════════════════════════════════╗${NC}"
-echo -e "${BLUE}║                                                        ║${NC}"
-echo -e "${BLUE}║       Zellij Web Terminal - 一键安装程序               ║${NC}"
-echo -e "${BLUE}║                                                        ║${NC}"
+echo -e "${BLUE}║       Zellij Web Terminal - 全自动安装                 ║${NC}"
 echo -e "${BLUE}╚════════════════════════════════════════════════════════╝${NC}"
 echo ""
 
@@ -43,7 +41,7 @@ fi
 # 检查依赖
 for cmd in python3 openssl curl; do
     if ! command -v $cmd &> /dev/null; then
-        log_error "缺少依赖: $cmd"
+        log_error "缺少依赖: $cmd，请先安装: sudo apt install python3 openssl curl"
         exit 1
     fi
 done
@@ -55,7 +53,6 @@ if [ "$EUID" -eq 0 ]; then
     BIN_DIR="/usr/local/bin"
     SERVICE_DIR="/etc/systemd/system"
     IS_ROOT=true
-    log_warn "检测到 root 用户，将安装到系统目录"
 else
     INSTALL_DIR="$HOME/.local/share/zellij-web"
     BIN_DIR="$HOME/.local/bin"
@@ -66,13 +63,7 @@ fi
 CONFIG_DIR="$INSTALL_DIR/config"
 CERT_DIR="$INSTALL_DIR/certs"
 
-# 确认安装
-read -p "确认安装到 $INSTALL_DIR ? (Y/n) " -n 1 -r
-echo
-if [[ $REPLY =~ ^[Nn]$ ]]; then
-    echo "已取消"
-    exit 0
-fi
+log_info "安装目录: $INSTALL_DIR"
 
 # 1. 创建目录
 log_step "创建安装目录..."
@@ -81,7 +72,7 @@ mkdir -p "$SERVICE_DIR"
 log_info "目录创建完成"
 
 # 2. 下载 zellij
-log_step "下载 Zellij (修改版，修复 IME 重复)..."
+log_step "下载 Zellij (修复 IME 重复输入)..."
 LATEST_TAG=$(curl -s "https://api.github.com/repos/$GITHUB_REPO/releases/latest" | grep '"tag_name"' | sed -E 's/.*"([^"]+)".*/\1/')
 if [ -z "$LATEST_TAG" ]; then
     LATEST_TAG="v1.0.0"
@@ -91,19 +82,19 @@ log_info "版本: $LATEST_TAG"
 
 curl -L --progress-bar -o "$BIN_DIR/zellij" "$ZELLIJ_URL"
 chmod +x "$BIN_DIR/zellij"
-log_info "Zellij 已安装到: $BIN_DIR/zellij"
+log_info "Zellij 已安装"
 
 # 3. 下载 proxy.py
 log_step "下载代理服务..."
 curl -sL "$GITHUB_RAW/proxy.py" -o "$CONFIG_DIR/proxy.py"
-log_info "代理服务已安装到: $CONFIG_DIR/proxy.py"
+log_info "代理服务已安装"
 
 # 4. 生成 SSL 证书
 log_step "生成 SSL 证书..."
 openssl req -x509 -newkey rsa:2048 -keyout "$CERT_DIR/key.pem" \
     -out "$CERT_DIR/cert.pem" -days 3650 -nodes \
     -subj "/CN=localhost" 2>/dev/null
-log_info "证书已生成: $CERT_DIR/"
+log_info "证书已生成"
 
 # 5. 生成登录 Token
 log_step "生成登录 Token..."
@@ -159,48 +150,46 @@ log_step "启动服务..."
 if [ "$IS_ROOT" = true ]; then
     systemctl daemon-reload
     systemctl enable zellij-web zellij-frontend
-    systemctl start zellij-web zellij-frontend
+    systemctl restart zellij-web zellij-frontend
     STATUS_CMD="systemctl status zellij-web zellij-frontend"
     RESTART_CMD="systemctl restart zellij-web zellij-frontend"
     LOG_CMD="journalctl -u zellij-frontend -f"
 else
     systemctl --user daemon-reload
     systemctl --user enable zellij-web zellij-frontend
-    systemctl --user start zellij-web zellij-frontend
+    systemctl --user restart zellij-web zellij-frontend
     STATUS_CMD="systemctl --user status zellij-web zellij-frontend"
     RESTART_CMD="systemctl --user restart zellij-web zellij-frontend"
     LOG_CMD="journalctl --user -u zellij-frontend -f"
     
-    # 启用 linger 使用户服务开机启动
+    # 启用 linger
     if command -v loginctl &> /dev/null; then
         sudo loginctl enable-linger $USER 2>/dev/null || true
     fi
 fi
 log_info "服务已启动"
 
+# 等待服务启动
+sleep 2
+
 # 获取服务器 IP
-SERVER_IP=$(hostname -I | awk '{print $1}')
-if [ -z "$SERVER_IP" ]; then
-    SERVER_IP=$(hostname)
-fi
+SERVER_IP=$(hostname -I | awk '{print $1}' 2>/dev/null || hostname)
 
 # 完成
 echo ""
 echo -e "${GREEN}╔════════════════════════════════════════════════════════╗${NC}"
-echo -e "${GREEN}║                                                        ║${NC}"
 echo -e "${GREEN}║              🎉 安装成功！                             ║${NC}"
-echo -e "${GREEN}║                                                        ║${NC}"
 echo -e "${GREEN}╚════════════════════════════════════════════════════════╝${NC}"
 echo ""
 echo -e "  ${BLUE}访问地址:${NC}  https://$SERVER_IP:18082"
 echo -e "  ${BLUE}登录Token:${NC} $TOKEN"
 echo ""
-echo -e "  ${YELLOW}注意：${NC}"
-echo -e "  1. 首次访问需接受自签名证书警告"
-echo -e "  2. 如无法访问，请检查防火墙是否开放 18082 端口"
+echo -e "  ${YELLOW}提示：${NC}"
+echo -e "  • 首次访问需接受自签名证书警告"
+echo -e "  • 防火墙需开放 18082 端口"
 echo ""
 echo -e "  ${BLUE}管理命令：${NC}"
-echo -e "  查看状态: $STATUS_CMD"
-echo -e "  重启服务: $RESTART_CMD"
-echo -e "  查看日志: $LOG_CMD"
+echo -e "  $STATUS_CMD"
+echo -e "  $RESTART_CMD"
+echo -e "  $LOG_CMD"
 echo ""
