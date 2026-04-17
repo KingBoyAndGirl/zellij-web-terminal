@@ -12,7 +12,7 @@ ZELLIJ = "127.0.0.1"
 ZELLIJ_PORT = 18084
 LISTEN_PORT = 18082
 # Auto-login token (created via: zellij web --create-token)
-AUTO_TOKEN="5c4b4a84-08f0-41fd-9b63-5d701dbaadfe"
+AUTO_TOKEN="c94665e2-89e3-4eba-8c9a-463571af1607"
 CERT = "/home/devbox/.local/share/zellij-web/certs/cert.pem"
 KEY = "/home/devbox/.local/share/zellij-web/certs/key.pem"
 WEB_DIR = "/home/devbox/.local/share/zellij-web/config"
@@ -183,13 +183,22 @@ INJECT_CSS = """<style>
 #term-wrap {
     position: absolute;
     top: 37px; left: 0; right: 0;
-    bottom: 205px;
+    bottom: 162px;  /* 4 rows * (36px + 3px) + 4px padding + 1px border = 162px */
     background: #000;
+    border: none;
+    outline: none;
 }
 #terminal {
     width: 100%;
     height: 100%;
+    border: none;
+    outline: none;
+    padding: 0;
+    margin: 0;
 }
+/* Remove xterm.js borders */
+.xterm { padding: 0; }
+.xterm-viewport { overflow: hidden !important; }
 #toolbar {
     position: fixed;
     bottom: 0; left: 0; right: 0;
@@ -622,6 +631,10 @@ INJECT_JS_TEMPLATE = """<script>
                 if (now - (window.__btnDebounce['newtab2'] || 0) < 300) return;
                 window.__btnDebounce['newtab2'] = now;
                 window.__wsSend('\\x1bn');
+                // Fullscreen the new tab
+                setTimeout(function() {
+                    window.__wsSend('\\x1bf');
+                }, 100);
                 // Use default name without counter
                 tabState.names.push(DEFAULT_TAB_NAME);
                 tabState.count++;
