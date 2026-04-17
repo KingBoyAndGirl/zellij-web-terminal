@@ -62,6 +62,11 @@ INJECT_CSS = """<style>
 .btn.rd { background: #3a1a1a; border-color: #e06c75; color: #e06c75; }
 .btn.yl { background: #3a3a1a; border-color: #e5c07b; color: #e5c07b; }
 .btn.pk { background: #3a1a3a; border-color: #c678dd; color: #c678dd; }
+.btn:disabled {
+    opacity: 0.8; cursor: default; background: #1a1a1a;
+    border-color: #555; color: #aaa; font-weight: 600;
+    flex: 1.5;  /* wider for "Tab 1/3" text */
+}
 .panel {
     display: none;
     position: fixed;
@@ -263,11 +268,10 @@ INJECT_HTML = """<div id="toolbar">
     </div>
     <div class="panel-title">Tab 切换</div>
     <div class="row">
-        <button class="btn" id="btn-tab1">Tab1</button>
-        <button class="btn" id="btn-tab2">Tab2</button>
-        <button class="btn" id="btn-tab3">Tab3</button>
-        <button class="btn" id="btn-tab4">Tab4</button>
-        <button class="btn" id="btn-tab5">Tab5</button>
+        <button class="btn bl" id="btn-newtab2">+新Tab</button>
+        <button class="btn" id="btn-tab-prev">◀</button>
+        <button class="btn" id="btn-tab-indicator" disabled>Tab 1/1</button>
+        <button class="btn" id="btn-tab-next">▶</button>
     </div>
     <div class="panel-title">工具</div>
     <div class="row">
@@ -339,11 +343,6 @@ INJECT_JS = """<script>
             'btn-fullscreen': '\\x1bf',
             'btn-detach': '\\x1bd',
             'btn-quit': '\\x1bq',
-            'btn-tab1': '\\x1b1',
-            'btn-tab2': '\\x1b2',
-            'btn-tab3': '\\x1b3',
-            'btn-tab4': '\\x1b4',
-            'btn-tab5': '\\x1b5',
             'btn-clear': 'clear\\n',
             'btn-history': 'history | tail -20\\n'
         };
@@ -371,6 +370,123 @@ INJECT_JS = """<script>
                     });
                 })(keyMap[id], id);
             }
+        }
+
+        // ── Tab state tracking (best-effort, button-driven) ──
+        var tabState = { current: 1, total: 1 };
+        var tabIndicator = document.getElementById('btn-tab-indicator');
+
+        function updateTabIndicator() {
+            if (tabIndicator) {
+                tabIndicator.textContent = 'Tab ' + tabState.current + '/' + tabState.total;
+            }
+        }
+
+        function sendTabCmd(data) {
+            if (typeof window.__wsSend === 'function') {
+                window.__wsSend(data);
+            }
+        }
+
+        // +新Tab: Alt+n
+        var btnNewTab2 = document.getElementById('btn-newtab2');
+        if (btnNewTab2) {
+            btnNewTab2.addEventListener('pointerdown', function(e) {
+                e.preventDefault();
+                var now = Date.now();
+                if (now - (window.__btnDebounce['newtab2'] || 0) < 300) return;
+                window.__btnDebounce['newtab2'] = now;
+                tabState.total++;
+                tabState.current = tabState.total;
+                sendTabCmd('\\x1bn');
+                updateTabIndicator();
+                console.log('[Tab] New tab ->', tabState.current + '/' + tabState.total);
+            });
+        }
+
+        // ◀ Tab prev: Alt+Left (clamp at tab 1, no wrap)
+        var btnTabPrev = document.getElementById('btn-tab-prev');
+        if (btnTabPrev) {
+            btnTabPrev.addEventListener('pointerdown', function(e) {
+                e.preventDefault();
+                var now = Date.now();
+                if (now - (window.__btnDebounce['tabprev'] || 0) < 300) return;
+                window.__btnDebounce['tabprev'] = now;
+                if (tabState.current <= 1) {
+                    console.log('[Tab] Already at tab 1, skip');
+                    return;
+                }
+                tabState.current--;
+                sendTabCmd('\\x1b[1;3D');  // Alt+Left
+                updateTabIndicator();
+                console.log('[Tab] Prev ->', tabState.current + '/' + tabState.total);
+            });
+        }
+
+        // ▶ Tab next: Alt+Right (clamp at last tab, no wrap)
+        var btnTabNext = document.getElementById('btn-tab-next');
+        if (btnTabNext) {
+            btnTabNext.addEventListener('pointerdown', function(e) {
+                e.preventDefault();
+                var now = Date.now();
+                if (now - (window.__btnDebounce['tabnext'] || 0) < 300) return;
+                window.__btnDebounce['tabnext'] = now;
+                if (tabState.current >= tabState.total) {
+                    console.log('[Tab] Already at last tab, skip');
+                    return;
+                }
+                tabState.current++;
+                sendTabCmd('\\x1b[1;3C');  // Alt+Right
+                updateTabIndicator();
+                console.log('[Tab] Next ->', tabState.current + '/' + tabState.total);
+            });
+        }
+
+        // Close tab: update counter (intercept from keyMap binding)
+        var origClose = document.getElementById('btn-close');
+        if (origClose) {
+            origClose.addEventListener('pointerdown', function() {
+                setTimeout(function() {
+                    if (tabState.total > 1) {
+                        tabState.total--;
+                        if (tabState.current > tabState.total) {
+                            tabState.current = tabState.total;
+                        }
+                        updateTabIndicator();
+                        console.log('[Tab] Close ->', tabState.current + '/' + tabState.total);
+                    }
+                }, 50);
+            }, true);  // capture phase, runs before keyMap handler
+        }
+
+        // Old "新Tab" button: also update counter
+        var origNewTab = document.getElementById('btn-newtab');
+        if (origNewTab) {
+            origNewTab.addEventListener('pointerdown', function() {
+                setTimeout(function() {
+                    tabState.total++;
+                    tabState.current = tabState.total;
+                    updateTabIndicator();
+                    console.log('[Tab] New(old) ->', tabState.current + '/' + tabState.total);
+                }, 50);
+            }, true);
+        }
+
+        // Alt+number direct jump: update counter if user uses keyboard
+        // We detect this via the term.onData for escaped sequences
+        if (term && term.onData) {
+            term.onData(function(data) {
+                // Detect Alt+1 through Alt+9 from keyboard
+                if (data.length === 2 && data.charCodeAt(0) === 0x1b) {
+                    var n = parseInt(data[1]);
+                    if (n >= 1 && n <= 9) {
+                        if (n > tabState.total) tabState.total = n;
+                        tabState.current = n;
+                        updateTabIndicator();
+                        console.log('[Tab] Jump to Alt+' + n + ' ->', tabState.current + '/' + tabState.total);
+                    }
+                }
+            });
         }
 
         // Panel toggles
