@@ -1,0 +1,15 @@
+[Unit]
+Description=Zellij Gateway Proxy
+After=network.target zellij-web.service
+
+[Service]
+Type=simple
+User=devbox
+WorkingDirectory=/home/devbox/.local/share/zellij-web/config
+ExecStart=/usr/bin/python3 /home/devbox/.local/share/zellij-web/config/proxy.py
+Restart=on-failure
+RestartSec=3
+Environment=HOME=/home/devbox
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,15 @@
+[Unit]
+Description=Zellij Web Terminal Server
+After=network.target
+
+[Service]
+Type=forking
+User=devbox
+ExecStartPre=/bin/bash -c 'echo exit | /home/devbox/.local/bin/zellij --session web 2>/dev/null || true'
+ExecStart=/home/devbox/.local/bin/zellij web --start --daemonize --port 18084 --ip 127.0.0.1
+Restart=on-failure
+RestartSec=5
+Environment=HOME=/home/devbox
+
+[Install]
+WantedBy=multi-user.target
