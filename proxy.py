@@ -363,8 +363,8 @@ INJECT_AUTH = """<script>
 INJECT_HTML = """<div id="toolbar">
     <div class="row">
         <button class="btn" id="btn-esc">ESC</button>
-        <button class="btn" id="btn-enter">↵ Enter</button>
-        <button class="btn" id="btn-newline">↩ 换行</button>
+        <button class="btn" id="btn-enter">Enter</button>
+        <button class="btn" id="btn-newline">换行</button>
         <button class="btn bl" id="btn-edit">TAB</button>
         <button class="btn rd" id="btn-close">关闭</button>
         <button class="btn" id="btn-hsplit">水平分屏</button>
@@ -811,14 +811,56 @@ INJECT_JS_TEMPLATE = """<script>
             // Zellij's input.js passes these through to xterm.js.
         });
 
-        // Visual viewport resize
+        // Mobile keyboard handling with visualViewport
         if (window.visualViewport) {
-            window.visualViewport.addEventListener('resize', function() {
-                var termWrap = document.getElementById('term-wrap');
-                if (termWrap) {
-                    termWrap.style.height = (window.visualViewport.height - 123) + 'px';
+            var toolbar = document.getElementById('toolbar');
+            var tabBar = document.getElementById('tab-bar');
+            var termWrap = document.getElementById('term-wrap');
+            var originalToolbarDisplay = '';
+            var originalTabBarDisplay = '';
+            var isKeyboardVisible = false;
+            
+            function handleViewportResize() {
+                var viewportHeight = window.visualViewport.height;
+                var windowHeight = window.innerHeight;
+                var keyboardHeight = windowHeight - viewportHeight;
+                
+                // Keyboard is visible if height difference > 100px
+                isKeyboardVisible = keyboardHeight > 100;
+                
+                if (isKeyboardVisible) {
+                    // Hide toolbar and tab bar to give more space
+                    if (toolbar) {
+                        originalToolbarDisplay = toolbar.style.display;
+                        toolbar.style.display = 'none';
+                    }
+                    if (tabBar) {
+                        originalTabBarDisplay = tabBar.style.display;
+                        tabBar.style.display = 'none';
+                    }
+                    // Adjust terminal to full visible area
+                    if (termWrap) {
+                        termWrap.style.bottom = '0';
+                        termWrap.style.height = viewportHeight + 'px';
+                    }
+                } else {
+                    // Restore toolbar and tab bar
+                    if (toolbar) {
+                        toolbar.style.display = originalToolbarDisplay || '';
+                    }
+                    if (tabBar) {
+                        tabBar.style.display = originalTabBarDisplay || '';
+                    }
+                    // Restore terminal height
+                    if (termWrap) {
+                        termWrap.style.bottom = '';
+                        termWrap.style.height = '';
+                    }
                 }
-            });
+            }
+            
+            window.visualViewport.addEventListener('resize', handleViewportResize);
+            window.visualViewport.addEventListener('scroll', handleViewportResize);
         }
     }
 })();
