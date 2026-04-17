@@ -27,9 +27,24 @@
     └── WebSocket → proxy → Zellij (/ws/terminal/default)
     
 注入内容:
-  - <head>: CSS 工具栏样式
-  - <body>: sessionName="default" + WS拦截 + 自动登录 + 按钮HTML + 按钮JS
+  - <head>: CSS (Tab栏 + 工具栏 + 面板样式)
+  - <body>: sessionName="default" + WS拦截 + 自动登录
+  - Tab栏 (顶部固定, 始终可见): [+New Tab][◀][Tab 1/1][▶]
+  - 工具栏 (底部固定): 基础按键 + 编辑/Zellij 操作面板
   - CSP: 修改为 'unsafe-inline' 允许内联脚本执行
+```
+
+## UI 布局 (2026-04-17 重构)
+```
+┌──────────────────────────────┐
+│ tab-bar: top=0, height=37px  │ ← Tab 栏始终可见
+│ [+New Tab] [◀][Tab 1/1][▶]  │
+├──────────────────────────────┤
+│ term-wrap: 37px → 底部       │ ← xterm.js Canvas 终端
+├──────────────────────────────┤
+│ toolbar (底部固定, ~80px)     │ ← 操作栏
+│ panel-edit / panel-zellij    │ ← 可展开面板
+└──────────────────────────────┘
 ```
 
 ## 关键发现
