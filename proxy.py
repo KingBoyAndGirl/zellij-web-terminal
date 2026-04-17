@@ -148,7 +148,7 @@ INJECT_WS_INTERCEPT = """<script>
     window.WebSocket.CLOSING = OriginalWebSocket.CLOSING;
     window.WebSocket.CLOSED = OriginalWebSocket.CLOSED;
     
-    // Helper for buttons to send data
+    // Helper for buttons to send data (with debounce to prevent double-fire)
     window.__wsSend = function(data) {
         var _d = typeof data === 'string' ? data.substring(0,40) : String(data).substring(0,40);
         if (window.__imeComposing) {
@@ -158,10 +158,14 @@ INJECT_WS_INTERCEPT = """<script>
         var ws = window._termWs;
         if (ws && ws.readyState === WebSocket.OPEN) {
             ws.send(data);
+            console.log('[Btn] __wsSend sent:', _d);
             return true;
         }
         return false;
     };
+    
+    // Button debounce map: prevent same button from firing within 300ms
+    window.__btnDebounce = {};
     
     // Server-side PR #5034 fix handles parse_stdin correctly (per-character consumption),
     // so no client-side IME intervention is needed. Let xterm.js handle composition normally.
@@ -348,16 +352,24 @@ INJECT_JS = """<script>
         for (var id in keyMap) {
             var btn = document.getElementById(id);
             if (btn) {
-                (function(data) {
+                (function(data, id) {
                     btn.addEventListener('pointerdown', function(e) {
                         e.preventDefault();
+                        // 300ms debounce to prevent double-fire
+                        var now = Date.now();
+                        var last = window.__btnDebounce[id] || 0;
+                        if (now - last < 300) {
+                            console.log('[Btn] Debounced:', id);
+                            return;
+                        }
+                        window.__btnDebounce[id] = now;
                         if (typeof window.__wsSend === 'function') {
                             window.__wsSend(data);
                         } else {
                             console.error('[Hermes] __wsSend not available');
                         }
                     });
-                })(keyMap[id]);
+                })(keyMap[id], id);
             }
         }
 
