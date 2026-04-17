@@ -12,10 +12,10 @@ ZELLIJ = "127.0.0.1"
 ZELLIJ_PORT = 18084
 LISTEN_PORT = 18082
 # Auto-login token (created via: zellij web --create-token)
-AUTO_TOKEN="72213dca-2113-4e81-b68b-0415ea2edd38"
-CERT = "/home/devbox/.config/zellij/cert.pem"
-KEY = "/home/devbox/.config/zellij/key.pem"
-WEB_DIR = "/home/devbox/.config/zellij/web"
+AUTO_TOKEN="5c4b4a84-08f0-41fd-9b63-5d701dbaadfe"
+CERT = "/home/devbox/.local/share/zellij-web/certs/cert.pem"
+KEY = "/home/devbox/.local/share/zellij-web/certs/key.pem"
+WEB_DIR = "/home/devbox/.local/share/zellij-web/config"
 TAB_STATE_FILE = os.path.join(WEB_DIR, "tab_state.json")
 
 # Get current username for tab names
@@ -862,10 +862,14 @@ INJECT_JS_TEMPLATE = """<script>
 })();
 </script>"""
 
-client_ctx = ssl.create_default_context()
-client_ctx.check_hostname = False
-client_ctx.verify_mode = ssl.CERT_NONE
-client_ctx.set_alpn_protocols(["http/1.1"])
+# SSL context for Zellij connection (only needed for non-loopback)
+if ZELLIJ == "127.0.0.1" or ZELLIJ == "localhost":
+    client_ctx = None  # Use plain HTTP for loopback
+else:
+    client_ctx = ssl.create_default_context()
+    client_ctx.check_hostname = False
+    client_ctx.verify_mode = ssl.CERT_NONE
+    client_ctx.set_alpn_protocols(["http/1.1"])
 
 
 async def handle_auto_login(reader, writer, headers):
