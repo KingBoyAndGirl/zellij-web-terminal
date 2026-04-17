@@ -813,49 +813,14 @@ INJECT_JS_TEMPLATE = """<script>
 
         // Mobile keyboard handling with visualViewport
         if (window.visualViewport) {
-            var toolbar = document.getElementById('toolbar');
-            var tabBar = document.getElementById('tab-bar');
             var termWrap = document.getElementById('term-wrap');
-            var originalToolbarDisplay = '';
-            var originalTabBarDisplay = '';
-            var isKeyboardVisible = false;
             
             function handleViewportResize() {
                 var viewportHeight = window.visualViewport.height;
-                var windowHeight = window.innerHeight;
-                var keyboardHeight = windowHeight - viewportHeight;
                 
-                // Keyboard is visible if height difference > 100px
-                isKeyboardVisible = keyboardHeight > 100;
-                
-                if (isKeyboardVisible) {
-                    // Hide toolbar and tab bar to give more space
-                    if (toolbar) {
-                        originalToolbarDisplay = toolbar.style.display;
-                        toolbar.style.display = 'none';
-                    }
-                    if (tabBar) {
-                        originalTabBarDisplay = tabBar.style.display;
-                        tabBar.style.display = 'none';
-                    }
-                    // Adjust terminal to full visible area
-                    if (termWrap) {
-                        termWrap.style.bottom = '0';
-                        termWrap.style.height = viewportHeight + 'px';
-                    }
-                } else {
-                    // Restore toolbar and tab bar
-                    if (toolbar) {
-                        toolbar.style.display = originalToolbarDisplay || '';
-                    }
-                    if (tabBar) {
-                        tabBar.style.display = originalTabBarDisplay || '';
-                    }
-                    // Restore terminal height
-                    if (termWrap) {
-                        termWrap.style.bottom = '';
-                        termWrap.style.height = '';
-                    }
+                // Adjust terminal to fit visible area above keyboard
+                if (termWrap) {
+                    termWrap.style.height = viewportHeight + 'px';
                 }
             }
             
