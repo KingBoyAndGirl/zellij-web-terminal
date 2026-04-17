@@ -176,14 +176,8 @@ INJECT_WS_INTERCEPT = """<script>
     }, true);
     
     // Dedup wrapper: prevent ws.send duplicate during compositionend
-    var _origSend = WebSocket.prototype.send;
-    WebSocket.prototype.send = function(data) {
-        if (typeof data === 'string' && _imeComposing) {
-            console.log('[IME] Blocked duplicate ws.send during composition:', data);
-            return;
-        }
-        return _origSend.apply(this, arguments);
-    };
+    // (replaces the older wrapper above - integrated into the same prototype chain)
+    ;
     
 })();
 </script>"""
