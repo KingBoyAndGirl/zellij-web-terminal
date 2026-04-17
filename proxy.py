@@ -163,10 +163,25 @@ INJECT_WS_INTERCEPT = """<script>
         return false;
     };
     
-    // IME Composition handlers - minimal approach
+    // IME Composition handlers - enhanced to block xterm.js input handling
+    var _imeInputHandler = null;
     document.addEventListener('compositionstart', function() {
         window.__imeComposing = true;
         console.log('[IME] compositionstart');
+        // Add input event listener to block xterm.js from reading textarea during composition
+        _imeInputHandler = function(e) {
+            if (window.__imeComposing) {
+                // Block xterm.js from processing input events during IME composition
+                e.stopImmediatePropagation();
+                e.stopPropagation();
+                e.preventDefault();
+                // Clear textarea to prevent any pending reads
+                var ta = document.querySelector('.xterm-helper-textarea');
+                if (ta) { ta.value = ''; }
+                console.log('[IME] Blocked input event during composition');
+            }
+        };
+        document.addEventListener('input', _imeInputHandler, true);
     }, true);
     
     document.addEventListener('compositionend', function(e) {
@@ -180,6 +195,11 @@ INJECT_WS_INTERCEPT = """<script>
         if (ta) { ta.value = ''; }
         // Reset composing flag BEFORE sending (so our ws.send wrapper allows it)
         window.__imeComposing = false;
+        // Remove input event listener
+        if (_imeInputHandler) {
+            document.removeEventListener('input', _imeInputHandler, true);
+            _imeInputHandler = null;
+        }
         // Send composed text via ws.send (our prototype wrapper handles dedup)
         if (finalText.length > 0) {
             var ws = window._termWs;
@@ -312,8 +332,14 @@ INJECT_JS = """<script>
     }, 5000);
 
     function init() {
-
-
+        // Disable xterm.js CompositionHelper to prevent duplicate IME input
+        if (term && term._core && term._core._compositionHelper) {
+            console.log('[IME] Disabling xterm.js CompositionHelper');
+            if (typeof term._core._compositionHelper.dispose === 'function') {
+                term._core._compositionHelper.dispose();
+            }
+            term._core._compositionHelper = null;
+        }
 
         // Button mappings - ESC sequences
         var keyMap = {
