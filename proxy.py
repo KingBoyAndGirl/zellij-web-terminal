@@ -387,11 +387,16 @@ INJECT_JS = """<script>
                 var maxLine = term.buffer.active.length;
                 var tabNums = [];
                 var activeTab = 1;
-                // Scan last 5 lines for zellij tab bar pattern
-                for (var row = Math.max(0, maxLine - 5); row < maxLine; row++) {
+                // Scan last 8 lines for zellij tab bar
+                var scanStart = Math.max(0, maxLine - 8);
+                console.log('[Tab] Scanning buffer lines', scanStart, '-', maxLine);
+                for (var row = scanStart; row < maxLine; row++) {
                     var line = term.buffer.active.getLine(row);
                     if (!line) continue;
                     var text = line.translateToString(0, line.length);
+                    if (text.trim().length > 0) {
+                        console.log('[Tab] Line', row, ':', JSON.stringify(text));
+                    }
                     // Match patterns like " Tab #1 ", "Tab #2 ", " Tab #3  "
                     var matches = text.match(/Tab\s*#(\d+)/g);
                     if (matches && matches.length > 0) {
@@ -427,14 +432,16 @@ INJECT_JS = """<script>
                     tabState.current = activeTab;
                     updateTabIndicator();
                     console.log('[Tab] Recovered from buffer:', tabState.current + '/' + tabState.total);
+                } else {
+                    console.log('[Tab] No Tab# pattern found, keeping 1/1');
                 }
             } catch(e) {
                 console.log('[Tab] Recovery failed:', e.message);
             }
         }
 
-        // Scan buffer after zellij has rendered (3s delay for initial paint)
-        setTimeout(recoverTabState, 3000);
+        // Scan buffer after zellij has rendered (1s delay for initial paint)
+        setTimeout(recoverTabState, 1000);
 
         function sendTabCmd(data) {
             if (typeof window.__wsSend === 'function') {
