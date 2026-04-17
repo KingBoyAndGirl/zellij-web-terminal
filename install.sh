@@ -42,9 +42,42 @@ mkdir -p "$SERVICE_DIR"
 # 2. 安装 zellij 二进制
 log_info "[2/6] 安装 zellij..."
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-cp "$SCRIPT_DIR/bin/zellij" "$BIN_DIR/zellij"
-chmod +x "$BIN_DIR/zellij"
-log_info "  已安装到: $BIN_DIR/zellij"
+
+if [ -f "$SCRIPT_DIR/bin/zellij" ]; then
+    # 本地有 zellij 二进制
+    cp "$SCRIPT_DIR/bin/zellij" "$BIN_DIR/zellij"
+    chmod +x "$BIN_DIR/zellij"
+    log_info "  已从本地安装到: $BIN_DIR/zellij"
+elif [ -f "$SCRIPT_DIR/zellij-x86_64" ]; then
+    # 本地有重命名的 zellij
+    cp "$SCRIPT_DIR/zellij-x86_64" "$BIN_DIR/zellij"
+    chmod +x "$BIN_DIR/zellij"
+    log_info "  已从本地安装到: $BIN_DIR/zellij"
+else
+    # 从 GitHub 下载
+    log_info "  本地未找到 zellij，从 GitHub 下载..."
+    GITHUB_REPO="KingBoyAndGirl/zellij-web-terminal"
+    LATEST_TAG=$(curl -s "https://api.github.com/repos/$GITHUB_REPO/releases/latest" | grep '"tag_name"' | sed -E 's/.*"([^"]+)".*/\1/')
+    
+    if [ -z "$LATEST_TAG" ]; then
+        LATEST_TAG="v1.0.0"
+    fi
+    
+    DOWNLOAD_URL="https://github.com/$GITHUB_REPO/releases/download/$LATEST_TAG/zellij-x86_64"
+    log_info "  下载地址: $DOWNLOAD_URL"
+    
+    if command -v wget &> /dev/null; then
+        wget -q --show-progress -O "$BIN_DIR/zellij" "$DOWNLOAD_URL"
+    elif command -v curl &> /dev/null; then
+        curl -L --progress-bar -o "$BIN_DIR/zellij" "$DOWNLOAD_URL"
+    else
+        log_error "需要 wget 或 curl 来下载文件"
+        exit 1
+    fi
+    
+    chmod +x "$BIN_DIR/zellij"
+    log_info "  已下载并安装到: $BIN_DIR/zellij"
+fi
 
 # 3. 安装 proxy.py
 log_info "[3/6] 安装代理服务..."
