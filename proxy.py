@@ -333,12 +333,27 @@ INJECT_JS = """<script>
 
     function init() {
         // Disable xterm.js CompositionHelper to prevent duplicate IME input
+        // Instead of nulling it (which causes updateCompositionElements errors),
+        // stub out its methods to no-ops so xterm.js can still call them safely
         if (term && term._core && term._core._compositionHelper) {
-            console.log('[IME] Disabling xterm.js CompositionHelper');
-            if (typeof term._core._compositionHelper.dispose === 'function') {
-                term._core._compositionHelper.dispose();
+            console.log('[IME] Stubbing xterm.js CompositionHelper');
+            var _ch = term._core._compositionHelper;
+            // Dispose the real composition helper first
+            if (typeof _ch.dispose === 'function') {
+                _ch.dispose();
             }
-            term._core._compositionHelper = null;
+            // Replace with a no-op stub so xterm.js render pipeline doesn't crash
+            term._core._compositionHelper = {
+                compositionstart: function() {},
+                compositionupdate: function() {},
+                compositionend: function() {},
+                updateCompositionElements: function() {},
+                clearComposition: function() {},
+                handleAnyTextareaChanges: function() {},
+                isComposing: function() { return false; },
+                dispose: function() {}
+            };
+            console.log('[IME] CompositionHelper stubbed successfully');
         }
 
         // Button mappings - ESC sequences
