@@ -347,6 +347,7 @@ INJECT_JS = """<script>
                 compositionstart: function() {},
                 compositionupdate: function() {},
                 compositionend: function() {},
+                keydown: function() { return false; },
                 updateCompositionElements: function() {},
                 clearComposition: function() {},
                 handleAnyTextareaChanges: function() {},
