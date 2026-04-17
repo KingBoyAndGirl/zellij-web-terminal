@@ -18,6 +18,10 @@ KEY = "/home/devbox/.config/zellij/key.pem"
 WEB_DIR = "/home/devbox/.config/zellij/web"
 TAB_STATE_FILE = os.path.join(WEB_DIR, "tab_state.json")
 
+# Get current username for tab names
+import os
+CURRENT_USER = os.environ.get("USER", os.environ.get("LOGNAME", "user"))
+
 # ── Tab state management (shared across all devices) ──
 import threading
 
@@ -30,10 +34,10 @@ def read_tab_state() -> dict:
             state = json.load(f)
         # Ensure names array exists
         if "names" not in state:
-            state["names"] = ["王总"] * state.get("count", 1)
+            state["names"] = [CURRENT_USER] * state.get("count", 1)
         return state
     except (FileNotFoundError, json.JSONDecodeError):
-        return {"count": 1, "active": 0, "names": ["王总"], "ts": 0}
+        return {"count": 1, "active": 0, "names": [CURRENT_USER], "ts": 0}
 
 def write_tab_state(count: int, active: int, names: list = None) -> dict:
     """Write tab state to file and return it."""
@@ -49,9 +53,9 @@ def write_tab_state(count: int, active: int, names: list = None) -> dict:
             if i < len(old_names):
                 names.append(old_names[i])
             else:
-                names.append("王总")
+                names.append(CURRENT_USER)
     else:
-        names = names[:count] + ["王总"] * max(0, count - len(names))
+        names = names[:count] + [CURRENT_USER] * max(0, count - len(names))
     state = {"count": count, "active": active, "names": names, "ts": time.time()}
     with _tab_lock:
         with open(TAB_STATE_FILE, "w") as f:
@@ -401,10 +405,10 @@ INJECT_HTML = """<div id="toolbar">
 """
 
 # JavaScript to inject (button bindings and other logic)
-INJECT_JS = """<script>
+INJECT_JS_TEMPLATE = """<script>
 (function() {
-    // Default tab name (can be customized)
-    var DEFAULT_TAB_NAME = '王总';
+    // Default tab name (current system user)
+    var DEFAULT_TAB_NAME = '{username}';
     
     // Wait for terminal to be ready
     var term = null;
@@ -455,12 +459,12 @@ INJECT_JS = """<script>
             'btn-search-next': String.fromCharCode(19),  // Ctrl+S = next match
             'btn-save': '\\x1b:wq!\\r',    // ESC + :wq!
             'btn-quitvim': '\\x1b:q!\\r',    // ESC + :q!
-            'btn-ctrlc': '\\\\x03',
-            'btn-hsplit': '\\\\x1bh',
-            'btn-vsplit': '\\\\x1bv',
-            'btn-fullscreen': '\\\\x1bf',
-            'btn-close': '\\\\x1bx',
-            'btn-detach': '\\\\x1bd',
+            'btn-ctrlc': '\x03',
+            'btn-hsplit': '\x1bh',
+            'btn-vsplit': '\x1bv',
+            'btn-fullscreen': '\x1bf',
+            'btn-close': '\x1bx',
+            'btn-detach': '\x1bd',
             'btn-quit': '\\x1bq',
             'btn-clear': 'clear\\n',
             'btn-gohome': 'cd ~\\n',
@@ -1176,7 +1180,11 @@ if (termDiv && !document.getElementById('term-wrap')) {
                 body_bytes = body_bytes.replace(b"</body>", wrap_script + b"\n</body>")
             # Now inject HTML and JS before </body>
             body_bytes = body_bytes.replace(b"</body>", INJECT_HTML.encode() + b"\n</body>")
-            body_bytes = body_bytes.replace(b"</body>", INJECT_JS.encode() + b"\n</body>")
+            # Generate INJECT_JS with current username
+            import os
+            current_user = os.environ.get("USER", os.environ.get("LOGNAME", "user"))
+            inject_js = INJECT_JS_TEMPLATE.replace("{username}", current_user)
+            body_bytes = body_bytes.replace(b"</body>", inject_js.encode() + b"\n</body>")
         
         # Build response
         out_headers = []
