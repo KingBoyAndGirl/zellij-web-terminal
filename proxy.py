@@ -267,7 +267,7 @@ INJECT_HTML = """<div id="toolbar">
     </div>
     <div class="panel-title">Tab 切换</div>
     <div class="row">
-        <button class="btn bl" id="btn-newtab2">+新Tab</button>
+        <button class="btn bl" id="btn-newtab2">New Tab</button>
         <button class="btn" id="btn-tab-prev">◀</button>
         <button class="btn" id="btn-tab-indicator" disabled>Tab 1/1</button>
         <button class="btn" id="btn-tab-next">▶</button>
