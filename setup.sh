@@ -104,10 +104,10 @@ log_info "Token: $TOKEN"
 
 # 6. 配置 proxy.py
 log_step "配置代理服务..."
-sed -i "s|AUTO_TOKEN=\".*\"|AUTO_TOKEN=\"$TOKEN\"|g" "$CONFIG_DIR/proxy.py"
-sed -i "s|CERT = \".*\"|CERT = \"$CERT_DIR/cert.pem\"|g" "$CONFIG_DIR/proxy.py"
-sed -i "s|KEY = \".*\"|KEY = \"$CERT_DIR/key.pem\"|g" "$CONFIG_DIR/proxy.py"
-sed -i "s|WEB_DIR = \".*\"|WEB_DIR = \"$CONFIG_DIR\"|g" "$CONFIG_DIR/proxy.py"
+sed -i 's|AUTO_TOKEN="[^"]*"|AUTO_TOKEN="'"$TOKEN"'"|g' "$CONFIG_DIR/proxy.py"
+sed -i 's|CERT = "[^"]*"|CERT = "'"$CERT_DIR/cert.pem"'"|g' "$CONFIG_DIR/proxy.py"
+sed -i 's|KEY = "[^"]*"|KEY = "'"$CERT_DIR/key.pem"'"|g' "$CONFIG_DIR/proxy.py"
+sed -i 's|WEB_DIR = "[^"]*"|WEB_DIR = "'"$CONFIG_DIR"'"|g' "$CONFIG_DIR/proxy.py"
 log_info "配置完成"
 
 # 7. 创建 systemd 服务
