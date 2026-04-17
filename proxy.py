@@ -275,7 +275,7 @@ INJECT_HTML = """<div id="toolbar">
     <div class="panel-title">工具</div>
     <div class="row">
         <button class="btn" id="btn-clear">清屏</button>
-        <button class="btn" id="btn-home">回家</button>
+        <button class="btn" id="btn-gohome">回家</button>
         <button class="btn" id="btn-history">历史</button>
     </div>
 </div>
@@ -342,6 +342,7 @@ INJECT_JS = """<script>
             'btn-detach': '\\x1bd',
             'btn-quit': '\\x1bq',
             'btn-clear': 'clear\\n',
+            'btn-gohome': 'cd ~\\n',
             'btn-history': 'history | tail -20\\n'
         };
 
