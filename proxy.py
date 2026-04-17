@@ -332,29 +332,37 @@ INJECT_JS = """<script>
     }, 5000);
 
     function init() {
-        // Disable xterm.js CompositionHelper to prevent duplicate IME input
-        // Instead of nulling it (which causes updateCompositionElements errors),
-        // stub out its methods to no-ops so xterm.js can still call them safely
+        // Patch xterm.js CompositionHelper to prevent duplicate IME input
+        // Strategy: Keep the real object (so updateCompositionElements/keydown work),
+        // but override compositionend to prevent it from sending composed text.
+        // Our own document-level compositionend handler handles sending instead.
         if (term && term._core && term._core._compositionHelper) {
-            console.log('[IME] Stubbing xterm.js CompositionHelper');
             var _ch = term._core._compositionHelper;
-            // Dispose the real composition helper first
-            if (typeof _ch.dispose === 'function') {
-                _ch.dispose();
-            }
-            // Replace with a no-op stub so xterm.js render pipeline doesn't crash
-            term._core._compositionHelper = {
-                compositionstart: function() {},
-                compositionupdate: function() {},
-                compositionend: function() {},
-                keydown: function() { return false; },
-                updateCompositionElements: function() {},
-                clearComposition: function() {},
-                handleAnyTextareaChanges: function() {},
-                isComposing: function() { return false; },
-                dispose: function() {}
+            console.log('[IME] Patching CompositionHelper compositionend');
+            // Save original for reference
+            _ch._originalCompositionEnd = _ch.compositionend;
+            // Override: clear composition state but DON'T send data
+            _ch.compositionend = function(e) {
+                console.log('[IME] CompositionHelper.compositionend intercepted');
+                // Clear the textarea to prevent stale data
+                if (this._textarea && this._textarea.value) {
+                    this._textarea.value = '';
+                }
+                // Reset composing state if the object tracks it
+                if ('_isComposing' in this) this._isComposing = false;
+                if ('isComposing' in this && typeof this._isComposing !== 'undefined') {
+                    this._isComposing = false;
+                }
+                // Do NOT call _finalizeComposition or triggerDataEvent
+                // Our document-level handler will send the text via ws.send
             };
-            console.log('[IME] CompositionHelper stubbed successfully');
+            // Also patch clearComposition if it could send data
+            if (typeof _ch._finalizeComposition === 'function') {
+                _ch._finalizeComposition = function() {
+                    console.log('[IME] CompositionHelper._finalizeComposition blocked');
+                };
+            }
+            console.log('[IME] CompositionHelper patched successfully');
         }
 
         // Button mappings - ESC sequences
