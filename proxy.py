@@ -364,12 +364,12 @@ INJECT_HTML = """<div id="toolbar">
     <div class="row">
         <button class="btn" id="btn-esc">ESC</button>
         <button class="btn" id="btn-enter">Enter</button>
-        <button class="btn" id="btn-newline">换行</button>
+        <button class="btn" id="btn-newline">Newline</button>
         <button class="btn bl" id="btn-edit">TAB</button>
-        <button class="btn rd" id="btn-close">关闭</button>
-        <button class="btn" id="btn-hsplit">水平分屏</button>
-        <button class="btn" id="btn-vsplit">垂直分屏</button>
-        <button class="btn yl" id="btn-fullscreen">全屏</button>
+        <button class="btn rd" id="btn-close">Close</button>
+        <button class="btn" id="btn-hsplit">H-Split</button>
+        <button class="btn" id="btn-vsplit">V-Split</button>
+        <button class="btn yl" id="btn-fullscreen">Fullscreen</button>
     </div>
     <div class="row">
         <button class="btn" id="btn-up">↑</button>
@@ -378,15 +378,15 @@ INJECT_HTML = """<div id="toolbar">
         <button class="btn" id="btn-right">→</button>
         <button class="btn" id="btn-backspace">⌫</button>
         <button class="btn" id="btn-delete">⌦</button>
-        <button class="btn gn" id="btn-paste">粘贴</button>
+        <button class="btn gn" id="btn-paste">Paste</button>
         <button class="btn rd" id="btn-ctrlc">^C</button>
     </div>
     <div class="row">
-        <button class="btn" id="btn-clear">清屏</button>
-        <button class="btn" id="btn-gohome">回家</button>
-        <button class="btn" id="btn-history">历史</button>
-        <button class="btn gn" id="btn-detach">断开</button>
-        <button class="btn rd" id="btn-quit">退出</button>
+        <button class="btn" id="btn-clear">Clear</button>
+        <button class="btn" id="btn-gohome">Home</button>
+        <button class="btn" id="btn-history">History</button>
+        <button class="btn gn" id="btn-detach">Detach</button>
+        <button class="btn rd" id="btn-quit">Quit</button>
     </div>
 </div>
 
@@ -396,7 +396,7 @@ INJECT_HTML = """<div id="toolbar">
 </div>
 
 <div class="panel" id="panel-edit">
-    <div class="panel-title">TAB 编辑</div>
+    <div class="panel-title">TAB Edit</div>
     <div class="row">
         <button class="btn" id="btn-tab">TAB</button>
     </div>
@@ -814,13 +814,42 @@ INJECT_JS_TEMPLATE = """<script>
         // Mobile keyboard handling with visualViewport
         if (window.visualViewport) {
             var termWrap = document.getElementById('term-wrap');
+            var toolbar = document.getElementById('toolbar');
+            var tabBar = document.getElementById('tab-bar');
             
             function handleViewportResize() {
                 var viewportHeight = window.visualViewport.height;
+                var windowHeight = window.innerHeight;
+                var keyboardHeight = windowHeight - viewportHeight;
+                var isKeyboardVisible = keyboardHeight > 100;
                 
-                // Adjust terminal to fit visible area above keyboard
+                // Adjust terminal height
                 if (termWrap) {
                     termWrap.style.height = viewportHeight + 'px';
+                }
+                
+                // Move toolbar above keyboard when visible
+                if (toolbar) {
+                    if (isKeyboardVisible) {
+                        // Position toolbar at bottom of visible viewport
+                        toolbar.style.position = 'fixed';
+                        toolbar.style.bottom = keyboardHeight + 'px';
+                    } else {
+                        // Reset to original position
+                        toolbar.style.position = '';
+                        toolbar.style.bottom = '';
+                    }
+                }
+                
+                // Move tab bar above keyboard too
+                if (tabBar) {
+                    if (isKeyboardVisible) {
+                        tabBar.style.position = 'fixed';
+                        tabBar.style.bottom = (keyboardHeight + toolbar.offsetHeight) + 'px';
+                    } else {
+                        tabBar.style.position = '';
+                        tabBar.style.bottom = '';
+                    }
                 }
             }
             
