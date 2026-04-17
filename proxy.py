@@ -87,173 +87,88 @@ body { margin: 0; padding: 0; overflow: hidden; }
 # WebSocket interception script - must run before any module scripts
 INJECT_WS_INTERCEPT = """<script>
 // Intercept WebSocket to force session name for multi-device sharing
-// This runs early, before Zellij's module scripts execute
+// AND wrap WebSocket.prototype.send for IME dedup (catches ALL send calls)
 (function() {
     var OriginalWebSocket = window.WebSocket;
-    window._termWs = null;  // Terminal WebSocket
-    window._ctrlWs = null;  // Control WebSocket
-    // IME composition guard (fix Win11 Chinese input doubling)
+    window._termWs = null;
+    window._ctrlWs = null;
     window.__imeComposing = false;
-    // Default session name, can be overridden by injected script
     window.sessionName = window.sessionName || 'default';
     
+    // IME dedup state (global, shared by prototype wrapper)
+    var _imeLastSent = {d: '', t: 0};
+    var _imeIsTerminalWs = function(ws) {
+        return ws === window._termWs;
+    };
+    
+    // PROTOTYPE-LEVEL send wrapper: catches ALL send calls regardless of reference
+    var _originalProtoSend = WebSocket.prototype.send;
+    WebSocket.prototype.send = function(data) {
+        if (_imeIsTerminalWs(this)) {
+            var _hex = typeof data === 'string' ? Array.from(data).map(function(c){return 'U+'+c.charCodeAt(0).toString(16).padStart(4,'0')}).join(' ') : String(data);
+            // Block all sends during IME composition
+            if (window.__imeComposing) {
+                console.log('[IME] proto.ws.send BLOCK composing:', _hex);
+                return;
+            }
+            // 1000ms identical-text dedup
+            var now = Date.now();
+            if (typeof data === 'string' && data.length > 0 && data.length < 10000) {
+                if (_imeLastSent.d === data && (now - _imeLastSent.t) < 1000) {
+                    console.log('[IME] proto.ws.send BLOCK dedup1000:', _hex);
+                    return;
+                }
+                _imeLastSent = {d: data, t: now};
+            }
+            console.log('[IME] proto.ws.send ACTUAL SEND:', _hex);
+        }
+        return _originalProtoSend.call(this, data);
+    };
+    
+    // Constructor wrapper for session name rewriting
     window.WebSocket = function(url, protocols) {
-        // Modify URL to use the configured session name
         if (url.indexOf('/ws/terminal') > -1) {
             var parsed = new URL(url, window.location.origin);
             var path = parsed.pathname;
-            // If path is exactly /ws/terminal or /ws/terminal/ (no session name)
             if (path === '/ws/terminal' || path === '/ws/terminal/') {
                 parsed.pathname = '/ws/terminal/' + window.sessionName;
                 url = parsed.toString();
             }
         }
-        
         var ws = protocols ? new OriginalWebSocket(url, protocols) : new OriginalWebSocket(url);
-        
-        // Store reference based on URL
         if (url.indexOf('/ws/terminal') > -1) {
             window._termWs = ws;
-            // Wrap ws.send with dedup to prevent double paste from
-            // ClipboardAddon + any residual handlers (buttons, etc.)
-            var _nativeSend = ws.send.bind(ws);
-            var _lastSent = {d: '', t: 0};
-            ws.send = function(data) {
-            var _hex = typeof data === 'string' ? Array.from(data).map(function(c){return 'U+'+c.charCodeAt(0).toString(16).padStart(4,'0')}).join(' ') : String(data);
-            // Block all sends during IME composition
-                if (window.__imeComposing) {
-                    console.log('[IME] ws.send BLOCK composing:', _hex);
-                    return;
-                }
-                var now = Date.now();
-                if (typeof data === 'string' && data.length > 0 && data.length < 10000) {
-                    if (_lastSent.d === data && (now - _lastSent.t) < 1000) {
-                        console.log('[IME] ws.send BLOCK dedup1000:', _hex);
-                        return;
-                    }
-                    _lastSent = {d: data, t: now};
-                }
-                console.log('[IME] ws.send ACTUAL SEND:', _hex, 'stack:', new Error().stack.split('\\n').slice(1,4).join(' | '));
-                _nativeSend(data);
-            };
-            // Log ALL server messages (echo)
-            var _nativeOnMsg = null;
-            ws.addEventListener('message', function(e) {
-                var _d = typeof e.data === 'string' ? e.data.substring(0, 80) : '[binary]';
-                console.log('[IME] ws.onmessage:', JSON.stringify(_d));
-            });
         } else if (url.indexOf('/ws/control') > -1) {
             window._ctrlWs = ws;
         }
-        
         return ws;
     };
-    
-    // Copy static properties
     window.WebSocket.CONNECTING = OriginalWebSocket.CONNECTING;
     window.WebSocket.OPEN = OriginalWebSocket.OPEN;
     window.WebSocket.CLOSING = OriginalWebSocket.CLOSING;
     window.WebSocket.CLOSED = OriginalWebSocket.CLOSED;
     
-    // Helper function to send data to terminal WebSocket
-    // Dedup state for __wsSend
-    window.__wsLast = {d: '', t: 0};
+    // Helper for buttons to send data
     window.__wsSend = function(data) {
         var _d = typeof data === 'string' ? data.substring(0,40) : String(data).substring(0,40);
-        // Block during IME composition
         if (window.__imeComposing) {
             console.log('[IME] __wsSend BLOCK composing:', _d);
             return true;
         }
         var ws = window._termWs;
         if (ws && ws.readyState === WebSocket.OPEN) {
-            var now = Date.now();
-            if (typeof data === 'string' && data.length > 0 && data.length < 10000) {
-                if (window.__wsLast.d === data && (now - window.__wsLast.t) < 1000) {
-                    console.log('[IME] __wsSend BLOCK dedup1000:', _d);
-                    return true;
-                }
-                window.__wsLast = {d: data, t: now};
-            }
-            console.log('[IME] __wsSend SEND:', _d);
             ws.send(data);
             return true;
         }
         return false;
     };
     
-    // IME Composition event handlers
-    // IME Strategy: Let xterm.js handle composition naturally, ws.send dedup catches duplicates.
-    // Previous approach (stopImmediatePropagation + manual ws.send + textarea clear) was fragile
-    // because it fought xterm.js's internal state machine (_finalizeComposition, _inputEvent).
-    //
-    // How it works now:
-    // 1. compositionstart: __imeComposing = true → blocks ws.send during pinyin typing
-    // 2. compositionend:   __imeComposing = false → xterm.js sends via onData → sendFunction → ws.send
-    // 3. ws.send wrapper:  1000ms identical-text dedup catches any duplicates
-    //
-    // Why this works: xterm.js's CompositionHelper._finalizeComposition(true) reads the textarea
-    // after setTimeout(0), calls triggerDataEvent(input) → onData → Zellij's sendFunction → ws.send.
-    // This is the exact same path as normal keyboard input, so our existing wrapper handles it.
-    // Global keyboard event logger
-    document.addEventListener('keydown', function(e) {
-        if (e.key.length === 1 || e.key === 'Process') {
-            console.log('[IME] keydown:', e.key, 'code:', e.code, 'isComposing:', e.isComposing);
-        }
-    }, true);
-    document.addEventListener('keyup', function(e) {
-        if (e.key.length === 1 || e.key === 'Process') {
-            console.log('[IME] keyup:', e.key, 'isComposing:', e.isComposing);
-        }
-    }, true);
-    
-    // Log ALL textarea events AND block input/textInput during IME
-    var _taObserver = new MutationObserver(function() {
-        var ta = document.querySelector('.xterm-helper-textarea');
-        if (ta && !ta._imeLogged) {
-            ta._imeLogged = true;
-            // Log all events on the textarea
-            ['compositionstart', 'compositionupdate', 'compositionend', 'input', 'textInput'].forEach(function(evtName) {
-                ta.addEventListener(evtName, function(e) {
-                    console.log('[IME] textarea.' + evtName + ':', JSON.stringify((e.data || ta.value || '').substring(0, 40)));
-                }, true);  // capture phase to see ALL
-            });
-            // CRITICAL: Block input/textInput during IME to prevent xterm.js rendering
-            ta.addEventListener('input', function(e) {
-                if (window.__imeComposing) {
-                    e.stopImmediatePropagation();
-                    e.preventDefault();
-                    console.log('[IME] BLOCKED textarea.input during composing');
-                }
-            }, true);
-            ta.addEventListener('textInput', function(e) {
-                if (window.__imeComposing) {
-                    e.stopImmediatePropagation();
-                    e.preventDefault();
-                    console.log('[IME] BLOCKED textarea.textInput during composing');
-                }
-            }, true);
-            // CRITICAL: Block textarea.compositionend AFTER we send via ws.send
-            // xterm.js reads e.data (immutable) from compositionend to render text
-            ta.addEventListener('compositionend', function(e) {
-                // Our document handler already sent the text via ws.send
-                // Now block xterm.js from also processing it
-                e.stopImmediatePropagation();
-                e.preventDefault();
-                ta.value = '';  // clear any residual
-                console.log('[IME] BLOCKED textarea.compositionend (already sent via ws)');
-            }, true);  // capture phase - fires right after document handler
-            console.log('[IME] textarea event listeners attached + input blockers active');
-        }
-    });
-    _taObserver.observe(document.body, {childList: true, subtree: true});
-    
+    // IME Composition handlers - minimal approach
     document.addEventListener('compositionstart', function() {
         window.__imeComposing = true;
         console.log('[IME] compositionstart');
     }, true);
-    // CRITICAL: Block ALL composition events from reaching xterm.js
-    // xterm.js reads e.data from compositionend to render text - we must prevent that
+    
     document.addEventListener('compositionend', function(e) {
         var ta = document.querySelector('.xterm-helper-textarea');
         var finalText = e.data || '';
@@ -261,24 +176,22 @@ INJECT_WS_INTERCEPT = """<script>
             finalText = ta.value;
         }
         console.log('[IME] compositionend, text:', finalText);
+        // Clear textarea IMMEDIATELY to prevent xterm.js from reading it
+        if (ta) { ta.value = ''; }
+        // Reset composing flag BEFORE sending (so our ws.send wrapper allows it)
+        window.__imeComposing = false;
+        // Send composed text via ws.send (our prototype wrapper handles dedup)
         if (finalText.length > 0) {
-            window.__imeJustSent = true;
-            window.__imeJustSentText = finalText;
-            window.__imeComposing = false;
             var ws = window._termWs;
             if (ws && ws.readyState === WebSocket.OPEN) {
                 ws.send(finalText);
                 console.log('[IME] SENT via ws.send:', Array.from(finalText).map(function(c){return 'U+'+c.charCodeAt(0).toString(16).padStart(4,'0')}).join(' '));
             }
         }
-        // Clear textarea to prevent xterm.js from reading residual text
-        if (ta) { ta.value = ''; }
-        window.__imeComposing = false;
-        console.log('[IME] composing cleared');
-        // NOW prevent the event from reaching xterm.js (bubbling textarea handlers)
+        // Block xterm.js from processing this event
         e.stopImmediatePropagation();
         e.preventDefault();
-    }, true);  // capture phase - we fire first
+    }, true);
     
 })();
 </script>"""
@@ -399,104 +312,8 @@ INJECT_JS = """<script>
     }, 5000);
 
     function init() {
-        // CRITICAL: Disable xterm.js's CompositionHelper
-        // It registers capture-phase handlers on the textarea that write composed
-        // text directly to the buffer, bypassing our ws.send wrapper.
-        (function() {
-            var ch = term._core && term._core._compositionHelper;
-            if (ch) {
-                if (ch.dispose) {
-                    ch.dispose();
-                    console.log('[IME] CompositionHelper disposed');
-                }
-                // Also nullify its methods as backup
-                if (ch._finalizeComposition) ch._finalizeComposition = function(){};
-                if (ch._handleCompositionUpdate) ch._handleCompositionUpdate = function(){};
-                if (ch._handleCompositionStart) ch._handleCompositionStart = function(){};
-                console.log('[IME] CompositionHelper methods neutered');
-            } else {
-                console.log('[IME] CompositionHelper not found at init time');
-            }
-        })();
 
-        // term.write interceptor: log and dedup IME renders
-        (function() {
-            var origWrite = term.write.bind(term);
-            var _lastWrite = {d: '', t: 0};
-            term.write = function(data) {
-                var now = Date.now();
-                if (typeof data === 'string' && data.length > 0 && data.length < 500) {
-                    console.log('[IME] term.write:', JSON.stringify(data.substring(0, 80)));
-                    if (_lastWrite.d === data && (now - _lastWrite.t) < 200) {
-                        console.log('[IME] term.write DEDUP');
-                        return;
-                    }
-                    _lastWrite = {d: data, t: now};
-                }
-                return origWrite(data);
-            };
-        })();
 
-        // COMPREHENSIVE: Intercept ALL xterm.js internal data paths
-        (function() {
-            var cs = term._core && term._core.coreService;
-            
-            // 1. Patch coreService.triggerDataEvent (if it exists)
-            if (cs && cs.triggerDataEvent) {
-                var origTrigger = cs.triggerDataEvent.bind(cs);
-                cs.triggerDataEvent = function(data, wasUserInput) {
-                    console.log('[IME] triggerDataEvent called:', JSON.stringify(String(data).substring(0, 40)));
-                    if (window.__imeJustSent && data === window.__imeJustSentText) {
-                        console.log('[IME] BLOCKED triggerDataEvent duplicate');
-                        window.__imeJustSent = false;
-                        window.__imeJustSentText = '';
-                        return;
-                    }
-                    return origTrigger(data, wasUserInput);
-                };
-                console.log('[IME] triggerDataEvent patched');
-            }
-            
-            // 2. Patch _onData event emitter (the actual event bus)
-            var coreKeys = Object.keys(term._core || {});
-            for (var i = 0; i < coreKeys.length; i++) {
-                var obj = term._core[coreKeys[i]];
-                if (obj && obj._onData && typeof obj._onData.fire === 'function') {
-                    (function(key, emitter) {
-                        var origFire = emitter.fire.bind(emitter);
-                        emitter.fire = function(data) {
-                            console.log('[IME] _onData.fire via _core.' + key + ':', JSON.stringify(String(data).substring(0, 40)));
-                            if (window.__imeJustSent && data === window.__imeJustSentText) {
-                                console.log('[IME] BLOCKED _onData.fire duplicate');
-                                window.__imeJustSent = false;
-                                window.__imeJustSentText = '';
-                                return;
-                            }
-                            return origFire(data);
-                        };
-                        console.log('[IME] _onData.fire patched via _core.' + key);
-                    })(coreKeys[i], obj._onData);
-                }
-            }
-            
-            // 3. Patch term.onData to intercept registered callbacks
-            if (term._core && term._core._onData && typeof term._core._onData.fire === 'function') {
-                var origCoreFire = term._core._onData.fire.bind(term._core._onData);
-                term._core._onData.fire = function(data) {
-                    console.log('[IME] _core._onData.fire:', JSON.stringify(String(data).substring(0, 40)));
-                    if (window.__imeJustSent && data === window.__imeJustSentText) {
-                        console.log('[IME] BLOCKED _core._onData.fire duplicate');
-                        window.__imeJustSent = false;
-                        window.__imeJustSentText = '';
-                        return;
-                    }
-                    return origCoreFire(data);
-                };
-                console.log('[IME] _core._onData.fire patched');
-            } else {
-                console.log('[IME] _core._onData NOT FOUND');
-            }
-        })();
 
         // Button mappings - ESC sequences
         var keyMap = {
