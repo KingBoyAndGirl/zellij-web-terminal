@@ -4,45 +4,48 @@ import asyncio
 import ssl
 import os
 import json
+import logging
 import re
-import threading
-import sys
-from typing import Optional
+from typing import Optional, Dict, Tuple
 
-# 配置
 ZELLIJ = "127.0.0.1"
 ZELLIJ_PORT = 18084
 LISTEN_PORT = 18082
-AUTO_TOKEN = "25008711-f1d7-47f8-be7e-de18a1f2b057"
-CERT = os.path.expanduser("~/.local/share/zellij-web/certs/cert.pem")
-KEY = os.path.expanduser("~/.local/share/zellij-web/certs/key.pem")
-WEB_DIR = os.path.expanduser("~/.local/share/zellij-web/config")
+# Auto-login token (created via: zellij web --create-token)
+AUTO_TOKEN="c94665e2-89e3-4eba-8c9a-463571af1607"
+CERT = "/home/devbox/.local/share/zellij-web/certs/cert.pem"
+KEY = "/home/devbox/.local/share/zellij-web/certs/key.pem"
+WEB_DIR = "/home/devbox/.local/share/zellij-web/config"
 TAB_STATE_FILE = os.path.join(WEB_DIR, "tab_state.json")
 
-# 获取用户名
+# Get current username for tab names
+import os
 CURRENT_USER = os.environ.get("USER", os.environ.get("LOGNAME", "user"))
 
-# Tab 状态管理
+# ── Tab state management (shared across all devices) ──
+import threading
+
 _tab_lock = threading.Lock()
 
 def read_tab_state() -> dict:
+    """Read tab state from file. Returns {count, active, names, ts}."""
     try:
         with open(TAB_STATE_FILE, "r") as f:
             state = json.load(f)
+        # Ensure names array exists
         if "names" not in state:
             state["names"] = [CURRENT_USER] * state.get("count", 1)
-        if "sessions" not in state:
-            # 为每个 Tab 生成 session 名称
-            state["sessions"] = [f"tab-{i+1}" for i in range(state.get("count", 1))]
         return state
     except (FileNotFoundError, json.JSONDecodeError):
-        return {"count": 1, "active": 0, "names": [CURRENT_USER], "sessions": ["tab-1"], "ts": 0}
+        return {"count": 1, "active": 0, "names": [CURRENT_USER], "ts": 0}
 
-def write_tab_state(count: int, active: int, names: list = None, sessions: list = None) -> dict:
+def write_tab_state(count: int, active: int, names: list = None) -> dict:
+    """Write tab state to file and return it."""
     import time
     count = max(1, count)
     active = max(0, min(active, count - 1))
     if names is None:
+        # Preserve existing names or generate defaults
         old = read_tab_state()
         old_names = old.get("names", [])
         names = []
@@ -53,30 +56,24 @@ def write_tab_state(count: int, active: int, names: list = None, sessions: list 
                 names.append(CURRENT_USER)
     else:
         names = names[:count] + [CURRENT_USER] * max(0, count - len(names))
-    
-    if sessions is None:
-        old = read_tab_state()
-        old_sessions = old.get("sessions", [])
-        sessions = []
-        for i in range(count):
-            if i < len(old_sessions):
-                sessions.append(old_sessions[i])
-            else:
-                sessions.append(f"tab-{i+1}")
-    else:
-        sessions = sessions[:count] + [f"tab-{i+1}" for i in range(len(sessions), count)]
-    
-    state = {"count": count, "active": active, "names": names, "sessions": sessions, "ts": time.time()}
+    state = {"count": count, "active": active, "names": names, "ts": time.time()}
     with _tab_lock:
         with open(TAB_STATE_FILE, "w") as f:
             json.dump(state, f)
     return state
 
-# 初始化 tab state 文件
+# Initialize tab state file
 if not os.path.exists(TAB_STATE_FILE):
     write_tab_state(1, 0)
 
-# CSS 注入
+# Load custom HTML template (optional, we may not need it)
+try:
+    with open(os.path.join(WEB_DIR, "index.html"), "r") as f:
+        CUSTOM_HTML = f.read()
+except:
+    CUSTOM_HTML = ""
+
+# CSS to inject
 INJECT_CSS = """<style>
 #tab-bar {
     position: fixed;
@@ -186,7 +183,7 @@ INJECT_CSS = """<style>
 #term-wrap {
     position: absolute;
     top: 37px; left: 0; right: 0;
-    bottom: 162px;
+    bottom: 162px;  /* 4 rows * (36px + 3px) + 4px padding + 1px border = 162px */
     background: #000;
     border: none;
     outline: none;
@@ -199,6 +196,7 @@ INJECT_CSS = """<style>
     padding: 0;
     margin: 0;
 }
+/* Remove xterm.js borders */
 .xterm { padding: 0; }
 .xterm-viewport { overflow: hidden !important; }
 #toolbar {
@@ -226,6 +224,22 @@ INJECT_CSS = """<style>
 .btn.gn { background: #1a3a1a; border-color: #98c379; color: #98c379; }
 .btn.rd { background: #3a1a1a; border-color: #e06c75; color: #e06c75; }
 .btn.yl { background: #3a3a1a; border-color: #e5c07b; color: #e5c07b; }
+.btn.pk { background: #3a1a3a; border-color: #c678dd; color: #c678dd; }
+.btn:disabled {
+    opacity: 0.8; cursor: default; background: #1a1a1a;
+    border-color: #555; color: #aaa; font-weight: 600;
+    flex: 1.5;  /* wider for "Tab 1/3" text */
+}
+.panel {
+    display: none;
+    position: fixed;
+    bottom: 86px; left: 0; right: 0;
+    background: #111; border-top: 1px solid #333;
+    padding: 8px; z-index: 998;
+    max-height: 50vh; overflow-y: auto;
+}
+.panel.open { display: block; }
+.panel-title { color: #666; font-size: 11px; margin-bottom: 4px; padding-left: 2px; }
 html { touch-action: manipulation; }
 body { margin: 0; padding: 0; overflow: hidden; }
 #paste-helper {
@@ -238,14 +252,48 @@ body { margin: 0; padding: 0; overflow: hidden; }
 }
 </style>"""
 
-# WebSocket 拦截脚本
+# WebSocket interception script - must run before any module scripts
 INJECT_WS_INTERCEPT = """<script>
+// Intercept WebSocket to force session name for multi-device sharing
+// AND wrap WebSocket.prototype.send for IME dedup (catches ALL send calls)
 (function() {
     var OriginalWebSocket = window.WebSocket;
     window._termWs = null;
     window._ctrlWs = null;
+    window.__imeComposing = false;
     window.sessionName = window.sessionName || 'default';
     
+    // IME dedup state (global, shared by prototype wrapper)
+    var _imeLastSent = {d: '', t: 0};
+    var _imeIsTerminalWs = function(ws) {
+        return ws === window._termWs;
+    };
+    
+    // PROTOTYPE-LEVEL send wrapper: catches ALL send calls regardless of reference
+    var _originalProtoSend = WebSocket.prototype.send;
+    WebSocket.prototype.send = function(data) {
+        if (_imeIsTerminalWs(this)) {
+            var _hex = typeof data === 'string' ? Array.from(data).map(function(c){return 'U+'+c.charCodeAt(0).toString(16).padStart(4,'0')}).join(' ') : String(data);
+            // Block all sends during IME composition
+            if (window.__imeComposing) {
+                console.log('[IME] proto.ws.send BLOCK composing:', _hex);
+                return;
+            }
+            // 1000ms identical-text dedup
+            var now = Date.now();
+            if (typeof data === 'string' && data.length > 0 && data.length < 10000) {
+                if (_imeLastSent.d === data && (now - _imeLastSent.t) < 1000) {
+                    console.log('[IME] proto.ws.send BLOCK dedup1000:', _hex);
+                    return;
+                }
+                _imeLastSent = {d: data, t: now};
+            }
+            console.log('[IME] proto.ws.send ACTUAL SEND:', _hex);
+        }
+        return _originalProtoSend.call(this, data);
+    };
+    
+    // Constructor wrapper for session name rewriting
     window.WebSocket = function(url, protocols) {
         if (url.indexOf('/ws/terminal') > -1) {
             var parsed = new URL(url, window.location.origin);
@@ -268,25 +316,50 @@ INJECT_WS_INTERCEPT = """<script>
     window.WebSocket.CLOSING = OriginalWebSocket.CLOSING;
     window.WebSocket.CLOSED = OriginalWebSocket.CLOSED;
     
+    // Helper for buttons to send data (with debounce to prevent double-fire)
     window.__wsSend = function(data) {
-        console.log("[Btn] __wsSend called:", data.substring(0, 20));
+        var _d = typeof data === 'string' ? data.substring(0,40) : String(data).substring(0,40);
+        if (window.__imeComposing) {
+            console.log('[IME] __wsSend BLOCK composing:', _d);
+            return true;
+        }
         var ws = window._termWs;
         if (ws && ws.readyState === WebSocket.OPEN) {
             ws.send(data);
+            console.log('[Btn] __wsSend sent:', _d);
             return true;
         }
         return false;
     };
     
+    // Button debounce map: prevent same button from firing within 300ms
     window.__btnDebounce = {};
+    
+    // Server-side PR #5034 fix handles parse_stdin correctly (per-character consumption),
+    // so no client-side IME intervention is needed. Let xterm.js handle composition normally.
+    var _imeComposing = false;
+    document.addEventListener('compositionstart', function() {
+        _imeComposing = true;
+        console.log('[IME] compositionstart');
+    }, true);
+    document.addEventListener('compositionend', function(e) {
+        _imeComposing = false;
+        console.log('[IME] compositionend, data:', e.data);
+    }, true);
+    
+    // Dedup wrapper: prevent ws.send duplicate during compositionend
+    // (replaces the older wrapper above - integrated into the same prototype chain)
+    ;
+    
 })();
 </script>"""
 
-# 自动认证脚本
+# Auto-login script - runs before module scripts, auto-authenticates with token
 INJECT_AUTH = """<script>
+// Auto-login: call /command/login before auth.js runs
 (function() {
     var xhr = new XMLHttpRequest();
-    xhr.open('POST', '/command/login', false);
+    xhr.open('POST', '/command/login', false); // synchronous for reliability
     xhr.setRequestHeader('Content-Type', 'application/json');
     xhr.send(JSON.stringify({auth_token: '', remember_me: true}));
     if (xhr.status === 200) {
@@ -295,7 +368,7 @@ INJECT_AUTH = """<script>
 })();
 </script>"""
 
-# HTML 注入
+# HTML for toolbar and panels
 INJECT_HTML = """<div id="toolbar">
     <div class="row">
         <button class="btn" id="btn-esc">ESC</button>
@@ -333,33 +406,46 @@ INJECT_HTML = """<div id="toolbar">
     <button class="tab-btn-new" id="btn-newtab2">+</button>
 </div>
 
+<div class="panel" id="panel-edit">
+    <div class="panel-title">TAB Edit</div>
+    <div class="row">
+        <button class="btn" id="btn-tab">TAB</button>
+    </div>
+</div>
+
 """
 
-# JavaScript 注入模板
+# JavaScript to inject (button bindings and other logic)
 INJECT_JS_TEMPLATE = """<script>
 (function() {
+    // Default tab name (current system user)
     var DEFAULT_TAB_NAME = '{username}';
     
+    // Wait for terminal to be ready
     var term = null;
     var checkInterval = setInterval(function() {
-        if (window.term) {
+        if (window.term && window.term._core && window.term._core._compositionHelper) {
             term = window.term;
             clearInterval(checkInterval);
-            console.log('[Hermes] Terminal ready, initializing buttons');
             init();
         }
     }, 100);
-    // Fallback: after 10s, init anyway
+    // Fallback: after 5s, init anyway even if CompositionHelper not found
     setTimeout(function() {
-        if (!term) {
+        if (!term && window.term) {
             clearInterval(checkInterval);
             term = window.term;
-            console.log('[Hermes] Timeout fallback, initializing buttons');
+            console.log('[IME] CompositionHelper not found within 5s, init fallback');
             init();
         }
-    }, 10000);
+    }, 5000);
 
     function init() {
+        // Server-side PR #5034 fix: parse_stdin now consumes per-character, so no IME duplication.
+        // Let xterm.js CompositionHelper work normally - no client-side intervention needed.
+        console.log('[IME] Server-side fix active, xterm.js will handle composition normally');
+
+        // Button mappings - ESC sequences
         var keyMap = {
             'btn-esc': '\\x1b',
             'btn-enter': '\\r',
@@ -371,38 +457,58 @@ INJECT_JS_TEMPLATE = """<script>
             'btn-tab': '\\t',
             'btn-backspace': '\\x7f',
             'btn-delete': '\\x1b[3~',
-            'btn-ctrlc': '\\x03',
-            'btn-hsplit': '\\x1bh',
-            'btn-vsplit': '\\x1bv',
-            'btn-fullscreen': '\\x1bf',
-            'btn-close': '\\x1bx',
-            'btn-detach': '\\x1bd',
+            'btn-home': '\\x1b[H',
+            'btn-end': '\\x1b[F',
+            'btn-ctrla': '\\x01',
+            'btn-ctrle': '\\x05',
+            'btn-ctrlu': '\\x15',
+            'btn-ctrlk': '\\x0b',
+            'btn-ctrlw': '\\x17',
+            // vim & search
+            'btn-search': String.fromCharCode(12),  // Ctrl+R reverse search
+            'btn-search-prev': String.fromCharCode(12),  // Ctrl+R = previous match
+            'btn-search-next': String.fromCharCode(19),  // Ctrl+S = next match
+            'btn-save': '\\x1b:wq!\\r',    // ESC + :wq!
+            'btn-quitvim': '\\x1b:q!\\r',    // ESC + :q!
+            'btn-ctrlc': '\x03',
+            'btn-hsplit': '\x1bh',
+            'btn-vsplit': '\x1bv',
+            'btn-fullscreen': '\x1bf',
+            'btn-close': '\x1bx',
+            'btn-detach': '\x1bd',
             'btn-quit': '\\x1bq',
             'btn-clear': 'clear\\n',
             'btn-gohome': 'cd ~\\n',
             'btn-history': 'history | tail -20\\n'
         };
 
+        // Setup button event listeners
         for (var id in keyMap) {
             var btn = document.getElementById(id);
             if (btn) {
                 (function(data, id) {
                     btn.addEventListener('pointerdown', function(e) {
                         e.preventDefault();
+                        // 300ms debounce to prevent double-fire
                         var now = Date.now();
                         var last = window.__btnDebounce[id] || 0;
-                        if (now - last < 300) return;
+                        if (now - last < 300) {
+                            console.log('[Btn] Debounced:', id);
+                            return;
+                        }
                         window.__btnDebounce[id] = now;
                         if (typeof window.__wsSend === 'function') {
                             window.__wsSend(data);
+                        } else {
+                            console.error('[Hermes] __wsSend not available');
                         }
                     });
                 })(keyMap[id], id);
             }
         }
 
-        // Tab 系统 - 每个 Tab 独立 session
-        var tabState = { count: 1, active: 0, ts: 0, names: [], sessions: [] };
+        // ── Browser-like Tab UI: dynamic tabs with close buttons ──
+        var tabState = { count: 1, active: 0, ts: 0, names: [] };
         var tabList = document.getElementById('tab-list');
         var TAB_API = '/api/tabs';
 
@@ -413,27 +519,36 @@ INJECT_JS_TEMPLATE = """<script>
                 (function(idx) {
                     var item = document.createElement('div');
                     item.className = 'tab-item' + (idx === tabState.active ? ' active' : '');
+
                     var name = document.createElement('span');
                     name.className = 'tab-name';
                     name.textContent = tabState.names[idx] || DEFAULT_TAB_NAME;
+
                     var close = document.createElement('button');
                     close.className = 'tab-close';
                     close.textContent = '×';
+
                     item.appendChild(name);
                     item.appendChild(close);
 
+                    // Click tab to switch
                     item.addEventListener('pointerdown', function(e) {
-                        if (e.target === close) return;
+                        console.log('[Tab Debug] Tab item clicked for idx:', idx, 'target:', e.target.tagName, 'target===close:', e.target === close, 'active:', tabState.active);
+                        if (e.target === close) return; // don't switch when clicking close
                         e.preventDefault();
                         var now = Date.now();
                         if (now - (window.__btnDebounce['tabclick'] || 0) < 200) return;
                         window.__btnDebounce['tabclick'] = now;
-                        if (idx !== tabState.active) switchToTab(idx);
+                        if (idx !== tabState.active) {
+                            switchToTab(idx);
+                        }
                     });
 
+                    // Click × to close
                     close.addEventListener('pointerdown', function(e) {
                         e.preventDefault();
                         e.stopPropagation();
+                        console.log('[Tab Debug] Close button clicked for idx:', idx, 'active:', tabState.active, 'count:', tabState.count);
                         var now = Date.now();
                         if (now - (window.__btnDebounce['tabclose' + idx] || 0) < 300) return;
                         window.__btnDebounce['tabclose' + idx] = now;
@@ -443,66 +558,55 @@ INJECT_JS_TEMPLATE = """<script>
                     tabList.appendChild(item);
                 })(i);
             }
+            // Scroll active tab into view
             var activeEl = tabList.querySelector('.tab-item.active');
             if (activeEl) activeEl.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' });
         }
 
         function switchToTab(idx) {
-            // 切换到对应的 session
-            var sessionName = tabState.sessions[idx] || ('tab-' + (idx + 1));
+            var diff = idx - tabState.active;
+            if (diff > 0) {
+                for (var i = 0; i < diff; i++) window.__wsSend('\x1b[1;3C'); // Alt+Right
+            } else if (diff < 0) {
+                for (var j = 0; j < -diff; j++) window.__wsSend('\x1b[1;3D'); // Alt+Left
+            }
             tabState.active = idx;
+            renderTabs();
             saveTabState();
-            // 重新加载页面到对应的 session
-            window.location.href = '/?session=' + encodeURIComponent(sessionName);
+            console.log('[Tab] Switch to:', idx + 1);
         }
 
         function closeTab(idx) {
-            if (tabState.count <= 1) return;
-            var sessionToDelete = tabState.sessions[idx];
-            
-            // 删除 session
-            fetch('/api/session/' + encodeURIComponent(sessionToDelete), {
-                method: 'DELETE'
-            }).catch(function(){});
-            
-            // 更新状态
-            tabState.names.splice(idx, 1);
-            tabState.sessions.splice(idx, 1);
-            tabState.count--;
-            
-            // 确定新的 active
-            var newActive;
-            if (idx < tabState.active) {
-                newActive = tabState.active - 1;
-            } else if (idx === tabState.active) {
-                newActive = Math.min(idx, tabState.count - 1);
-            } else {
-                newActive = tabState.active;
+            if (tabState.count <= 1) return; // don't close last tab
+            // Switch to target tab first if not active
+            if (idx !== tabState.active) {
+                switchToTab(idx);
             }
-            
-            tabState.active = newActive;
+            // Send Alt+x to close current tab
+            window.__wsSend('\x1bx');
+            tabState.names.splice(idx, 1);
+            tabState.count--;
+            if (tabState.active >= tabState.count) {
+                tabState.active = tabState.count - 1;
+            }
+            renderTabs();
             saveTabState();
-            
-            // 跳转到新的 active session
-            var newSession = tabState.sessions[newActive] || ('tab-' + (newActive + 1));
-            window.location.href = '/?session=' + encodeURIComponent(newSession);
+            console.log('[Tab] Close:', idx + 1, 'now:', tabState.active + 1 + '/' + tabState.count);
         }
 
+        // Save tab state to server
         function saveTabState() {
             fetch(TAB_API, {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({
-                    count: tabState.count,
-                    active: tabState.active,
-                    names: tabState.names,
-                    sessions: tabState.sessions
-                })
+                body: JSON.stringify({count: tabState.count, active: tabState.active, names: tabState.names})
             }).then(function(r){ return r.json(); }).then(function(s){
                 tabState.ts = s.ts;
-            });
+                console.log('[Tab] Saved:', tabState.active+1 + '/' + tabState.count);
+            }).catch(function(e){ console.warn('[Tab] Save failed:', e); });
         }
 
+        // Poll server for tab state changes
         function pollTabState() {
             fetch(TAB_API).then(function(r){ return r.json(); }).then(function(s){
                 if (s.ts && s.ts !== tabState.ts) {
@@ -510,14 +614,15 @@ INJECT_JS_TEMPLATE = """<script>
                     tabState.active = s.active;
                     tabState.ts = s.ts;
                     if (s.names) tabState.names = s.names;
-                    if (s.sessions) tabState.sessions = s.sessions;
                     renderTabs();
+                    console.log('[Tab] Synced:', tabState.active+1 + '/' + tabState.count);
                 }
             }).catch(function(){});
         }
 
         setInterval(pollTabState, 600);
 
+        // + button: create new tab
         var btnNewTab2 = document.getElementById('btn-newtab2');
         if (btnNewTab2) {
             btnNewTab2.addEventListener('pointerdown', function(e) {
@@ -525,68 +630,203 @@ INJECT_JS_TEMPLATE = """<script>
                 var now = Date.now();
                 if (now - (window.__btnDebounce['newtab2'] || 0) < 300) return;
                 window.__btnDebounce['newtab2'] = now;
-                
-                // 创建新的 session 名称
-                var newSession = 'tab-' + Date.now();
+                window.__wsSend('\\x1bn');
+                // Fullscreen the new tab
+                setTimeout(function() {
+                    window.__wsSend('\\x1bf');
+                }, 100);
+                // Use default name without counter
                 tabState.names.push(DEFAULT_TAB_NAME);
-                tabState.sessions.push(newSession);
                 tabState.count++;
                 tabState.active = tabState.count - 1;
+                renderTabs();
                 saveTabState();
-                
-                // 跳转到新 session
-                window.location.href = '/?session=' + encodeURIComponent(newSession);
+                console.log('[Tab] New:', tabState.active+1 + '/' + tabState.count);
             });
         }
 
+        // Keyboard shortcuts for tab tracking
         document.addEventListener('keydown', function(e) {
             if (e.altKey && e.key === 'n') {
-                var newSession = 'tab-' + Date.now();
                 tabState.names.push(DEFAULT_TAB_NAME);
-                tabState.sessions.push(newSession);
                 tabState.count++;
                 tabState.active = tabState.count - 1;
+                renderTabs();
                 saveTabState();
-                window.location.href = '/?session=' + encodeURIComponent(newSession);
             }
             if (e.altKey && e.key === 'x') {
                 if (tabState.count > 1) {
-                    closeTab(tabState.active);
+                    tabState.names.splice(tabState.active, 1);
+                    tabState.count--;
+                    if (tabState.active >= tabState.count) tabState.active = tabState.count - 1;
                 }
+                renderTabs();
+                saveTabState();
             }
             if (e.altKey && e.key === 'ArrowLeft') {
-                var newIdx = tabState.active > 0 ? tabState.active - 1 : tabState.count - 1;
-                switchToTab(newIdx);
+                tabState.active = tabState.active > 0 ? tabState.active - 1 : tabState.count - 1;
+                renderTabs();
+                saveTabState();
             }
             if (e.altKey && e.key === 'ArrowRight') {
-                var newIdx = tabState.active < tabState.count - 1 ? tabState.active + 1 : 0;
-                switchToTab(newIdx);
+                tabState.active = tabState.active < tabState.count - 1 ? tabState.active + 1 : 0;
+                renderTabs();
+                saveTabState();
             }
         });
 
+        // Initial load
         pollTabState();
         renderTabs();
+        
 
-        // 粘贴功能
-        var _pasteCooldown = 0;
-        function doPaste() {
-            var now = Date.now();
-            if (now - _pasteCooldown < 500) return;
-            _pasteCooldown = now;
-            if (navigator.clipboard && navigator.clipboard.readText) {
-                navigator.clipboard.readText().then(function(text) {
-                    if (text && term) term.paste(text);
-                }).catch(function() {
-                    var el = document.getElementById('paste-helper');
-                    if (el) { el.value = ''; el.focus(); }
-                });
-            }
+        // Panel toggles
+        // Panel toggle - TAB button opens edit panel
+        var editPanel = document.getElementById('panel-edit');
+        var btnEdit = document.getElementById('btn-edit');
+        
+        if (btnEdit && editPanel) {
+            btnEdit.addEventListener('click', function() {
+                editPanel.classList.toggle('open');
+            });
         }
 
-        var btnPaste = document.getElementById('btn-paste');
-        if (btnPaste) btnPaste.addEventListener('click', doPaste);
+        // Copy function - use execCommand for broader compatibility
+        var btnCopy = document.getElementById('btn-copy');
+        if (btnCopy) {
+            btnCopy.addEventListener('click', function() {
+                if (term && term.hasSelection && term.hasSelection()) {
+                    var text = term.getSelection();
+                    var ta = document.createElement('textarea');
+                    ta.value = text;
+                    ta.style.position = 'fixed';
+                    ta.style.left = '-9999px';
+                    document.body.appendChild(ta);
+                    ta.select();
+                    try {
+                        document.execCommand('copy');
+                        flash('已复制 ✓');
+                    } catch(e) {
+                        flash('复制失败');
+                    }
+                    document.body.removeChild(ta);
+                } else {
+                    flash('请先选中文本');
+                }
+            });
+        }
 
-        // 移动端键盘适配
+        // Paste helper for iOS (no permission required)
+        // Paste function — clipboard.readText + 500ms cooldown + in-callback dedup
+        var _pasteCooldown = 0;
+        var _lastPastedText = '';
+        function doPaste() {
+            var now = Date.now();
+            if (now - _pasteCooldown < 500) {
+                return;
+            }
+            _pasteCooldown = now;
+            _lastPastedText = '';
+            if (navigator.clipboard && navigator.clipboard.readText) {
+                navigator.clipboard.readText().then(function(text) {
+                    if (text && text !== _lastPastedText) {
+                        _lastPastedText = text;
+                        term.paste(text);
+                        flash('已粘贴');
+                    }
+                }).catch(function(err) {
+                    showPasteArea();
+                });
+            } else {
+                showPasteArea();
+            }
+        }
+        
+        // iOS fallback: visible textarea for manual paste
+        function showPasteArea() {
+            var el = document.getElementById('paste-area');
+            if (!el) {
+                el = document.createElement('div');
+                el.id = 'paste-area';
+                el.style.cssText = 'position:fixed;bottom:92px;left:8px;right:8px;z-index:9998;background:#222;border:1px solid #61afef;border-radius:8px;padding:8px;display:flex;gap:6px;align-items:flex-end;';
+                var ta = document.createElement('textarea');
+                ta.id = 'paste-area-input';
+                ta.style.cssText = 'flex:1;height:60px;background:#111;color:#ddd;border:1px solid #444;border-radius:5px;padding:6px;font-family:monospace;font-size:13px;resize:none;outline:none;';
+                ta.placeholder = '长按粘贴文本...';
+                var sendBtn = document.createElement('button');
+                sendBtn.textContent = '发送';
+                sendBtn.style.cssText = 'background:#98c379;color:#111;border:none;border-radius:5px;padding:10px 14px;font-size:13px;font-weight:600;cursor:pointer;height:fit-content;';
+                sendBtn.onclick = function() {
+                    if (ta.value) {
+                        term.paste(ta.value);
+                        flash('已粘贴');
+                    }
+                    el.style.display = 'none';
+                    ta.value = '';
+                };
+                var closeBtn = document.createElement('button');
+                closeBtn.textContent = 'X';
+                closeBtn.style.cssText = 'background:#555;color:#ddd;border:none;border-radius:5px;padding:10px 10px;font-size:13px;cursor:pointer;height:fit-content;';
+                closeBtn.onclick = function() { el.style.display = 'none'; ta.value = ''; };
+                el.appendChild(ta);
+                el.appendChild(sendBtn);
+                el.appendChild(closeBtn);
+                document.body.appendChild(el);
+            }
+            el.style.display = 'flex';
+            setTimeout(function() { document.getElementById('paste-area-input').focus(); }, 100);
+        }
+
+        var triggerPaste = doPaste;
+        // Bind paste buttons
+        var btnPaste = document.getElementById('btn-paste');
+        var btnPaste2 = document.getElementById('btn-paste2');
+        if (btnPaste) btnPaste.addEventListener('click', doPaste);
+        if (btnPaste2) btnPaste2.addEventListener('click', doPaste);
+
+        // Flash notification
+        function flash(msg) {
+            var el = document.createElement('div');
+            el.textContent = msg;
+            el.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:#333;color:#fff;padding:12px 24px;border-radius:8px;font-size:16px;z-index:9999;pointer-events:none;';
+            document.body.appendChild(el);
+            setTimeout(function() { el.remove(); }, 1000);
+        }
+
+        // Zellij uses ClipboardAddon (@xterm/addon-clipboard) natively for paste.
+        // input.js passes Cmd+V/Ctrl+Shift+V through to xterm.js, which handles
+        // clipboard read → onData → sendFunction → ws.send.
+        // We do NOT intercept paste events — let xterm.js handle everything.
+        // For Chinese IME, xterm.js natively handles composition events.
+        // For button paste: use term.paste(text) instead of __wsSend to go through
+        // the same xterm.js input pipeline as Ctrl+Shift+V (proven no duplication).
+        // Keyboard shortcuts
+        document.addEventListener('keydown', function(e) {
+            if (e.key === 'Enter' && (e.shiftKey || e.altKey)) {
+                e.preventDefault();
+                if (typeof window.__wsSend === 'function') {
+                    window.__wsSend('\\n');
+                }
+                return;
+            }
+            if (e.key === 'C' && e.ctrlKey && e.shiftKey) {
+                e.preventDefault();
+                // Copy selection
+                if (term && term.hasSelection && term.hasSelection()) {
+                    var selection = term.getSelection();
+                    navigator.clipboard.writeText(selection).then(function() {
+                        flash('已复制 ✓');
+                    }).catch(function() {
+                        flash('复制失败');
+                    });
+                }
+                return;
+            }
+            // Cmd+V / Ctrl+V / Ctrl+Shift+V — let xterm.js + ClipboardAddon handle natively.
+            // Zellij's input.js passes these through to xterm.js.
+        });
+
+        // Mobile keyboard handling with visualViewport
         if (window.visualViewport) {
             var termWrap = document.getElementById('term-wrap');
             var toolbar = document.getElementById('toolbar');
@@ -598,20 +838,29 @@ INJECT_JS_TEMPLATE = """<script>
                 var keyboardHeight = windowHeight - viewportHeight;
                 var isKeyboardVisible = keyboardHeight > 100;
                 
-                if (termWrap) termWrap.style.height = viewportHeight + 'px';
+                // Adjust terminal height
+                if (termWrap) {
+                    termWrap.style.height = viewportHeight + 'px';
+                }
+                
+                // Move toolbar above keyboard when visible
                 if (toolbar) {
                     if (isKeyboardVisible) {
+                        // Position toolbar at bottom of visible viewport
                         toolbar.style.position = 'fixed';
                         toolbar.style.bottom = keyboardHeight + 'px';
                     } else {
+                        // Reset to original position
                         toolbar.style.position = '';
                         toolbar.style.bottom = '';
                     }
                 }
+                
+                // Move tab bar above keyboard too
                 if (tabBar) {
                     if (isKeyboardVisible) {
                         tabBar.style.position = 'fixed';
-                        tabBar.style.bottom = (keyboardHeight + (toolbar ? toolbar.offsetHeight : 162)) + 'px';
+                        tabBar.style.bottom = (keyboardHeight + toolbar.offsetHeight) + 'px';
                     } else {
                         tabBar.style.position = '';
                         tabBar.style.bottom = '';
@@ -626,9 +875,9 @@ INJECT_JS_TEMPLATE = """<script>
 })();
 </script>"""
 
-# SSL context
+# SSL context for Zellij connection (only needed for non-loopback)
 if ZELLIJ == "127.0.0.1" or ZELLIJ == "localhost":
-    client_ctx = None
+    client_ctx = None  # Use plain HTTP for loopback
 else:
     client_ctx = ssl.create_default_context()
     client_ctx.check_hostname = False
@@ -637,12 +886,15 @@ else:
 
 
 async def handle_auto_login(reader, writer, headers):
+    """Intercept /command/login, forward to Zellij with auto-token."""
     try:
+        # Read the request body (may contain remember_me)
         cl = int(headers.get("content-length", 0))
         body = b""
         if cl > 0:
             body = await asyncio.wait_for(reader.readexactly(cl), timeout=10)
 
+        # Forward to Zellij with our auto-token
         zr, zw = await asyncio.open_connection(ZELLIJ, ZELLIJ_PORT, ssl=client_ctx)
         login_body = json.dumps({"auth_token": AUTO_TOKEN, "remember_me": True}).encode()
         req = (
@@ -656,20 +908,30 @@ async def handle_auto_login(reader, writer, headers):
         zw.write(req)
         await zw.drain()
 
+        # Read response
         resp_head = await asyncio.wait_for(zr.readuntil(b"\r\n\r\n"), timeout=10)
         resp_text = resp_head.decode("utf-8", errors="replace")
 
+        # Parse response headers for Set-Cookie
         rh = {}
         for line in resp_text.split("\r\n")[1:]:
             if ":" in line:
                 k, v = line.split(":", 1)
                 rh[k.strip().lower()] = v.strip()
 
+        # Read body
         resp_cl = int(rh.get("content-length", 0))
         resp_body = b""
         if resp_cl > 0:
             resp_body = await asyncio.wait_for(zr.readexactly(resp_cl), timeout=10)
+        else:
+            while True:
+                chunk = await asyncio.wait_for(zr.read(4096), timeout=5)
+                if not chunk:
+                    break
+                resp_body += chunk
 
+        # Forward response to client
         out_headers = []
         for k, v in rh.items():
             out_headers.append(f"{k}: {v}")
@@ -695,7 +957,9 @@ async def handle_auto_login(reader, writer, headers):
 
 
 async def handle_auto_session(reader, writer, raw_header):
+    """Handle /session by directly calling Zellij with our auto-token cookie."""
     try:
+        # Read the original request body (needed to drain it)
         lines = raw_header.split("\r\n")
         headers_dict = {}
         for line in lines[1:]:
@@ -706,6 +970,7 @@ async def handle_auto_session(reader, writer, raw_header):
         if cl > 0:
             await asyncio.wait_for(reader.readexactly(cl), timeout=10)
 
+        # First, login to get a valid cookie
         zr, zw = await asyncio.open_connection(ZELLIJ, ZELLIJ_PORT, ssl=client_ctx)
         login_body = json.dumps({"auth_token": AUTO_TOKEN, "remember_me": True}).encode()
         login_req = (
@@ -719,14 +984,17 @@ async def handle_auto_session(reader, writer, raw_header):
         zw.write(login_req)
         await zw.drain()
 
+        # Read login response to get cookie
         login_resp_head = await asyncio.wait_for(zr.readuntil(b"\r\n\r\n"), timeout=10)
         login_resp_text = login_resp_head.decode("utf-8", errors="replace")
 
+        # Parse Set-Cookie
         cookie = ""
         for line in login_resp_text.split("\r\n"):
             if line.lower().startswith("set-cookie:"):
                 cookie = line.split(":", 1)[1].strip().split(";")[0]
 
+        # Drain login response body
         lrh = {}
         for line in login_resp_text.split("\r\n")[1:]:
             if ":" in line:
@@ -736,6 +1004,7 @@ async def handle_auto_session(reader, writer, raw_header):
         if lr_cl > 0:
             await asyncio.wait_for(zr.readexactly(lr_cl), timeout=10)
 
+        # Now call /session with the cookie
         session_body = json.dumps({"session_name": "default"}).encode()
         session_req = (
             f"POST /session HTTP/1.1\r\n"
@@ -749,6 +1018,7 @@ async def handle_auto_session(reader, writer, raw_header):
         zw.write(session_req)
         await zw.drain()
 
+        # Read session response
         session_resp_head = await asyncio.wait_for(zr.readuntil(b"\r\n\r\n"), timeout=10)
         session_resp_text = session_resp_head.decode("utf-8", errors="replace")
 
@@ -762,10 +1032,18 @@ async def handle_auto_session(reader, writer, raw_header):
         resp_body = b""
         if sr_cl > 0:
             resp_body = await asyncio.wait_for(zr.readexactly(sr_cl), timeout=10)
+        else:
+            while True:
+                chunk = await asyncio.wait_for(zr.read(4096), timeout=5)
+                if not chunk:
+                    break
+                resp_body += chunk
 
+        # Forward session response to client with our Set-Cookie from login
         out_headers = []
         for k, v in srh.items():
             out_headers.append(f"{k}: {v}")
+        # Add the login cookie so the browser stores it
         out_headers.append(f"Set-Cookie: {cookie}; HttpOnly; SameSite=Strict; Secure; Path=/; Max-Age=2419200")
         resp_out = session_resp_text.split("\r\n")[0] + "\r\n" + "\r\n".join(out_headers) + "\r\n\r\n"
         writer.write(resp_out.encode() + resp_body)
@@ -803,6 +1081,7 @@ async def handle_client(reader, writer):
 
         is_ws = headers.get("upgrade", "").lower() == "websocket"
 
+        # Auto-auth: intercept login and session endpoints
         if method == "POST" and path == "/command/login":
             await handle_auto_login(reader, writer, headers)
             return
@@ -811,6 +1090,7 @@ async def handle_client(reader, writer):
             await handle_auto_session(reader, writer, header_text)
             return
 
+        # Tab state API (shared across all devices)
         if path == "/api/tabs" and method == "GET":
             state = read_tab_state()
             body = json.dumps(state).encode()
@@ -820,6 +1100,7 @@ async def handle_client(reader, writer):
             return
 
         if path == "/api/tabs" and method == "POST":
+            # Read body
             cl = int(headers.get("content-length", 0))
             if cl > 0 and cl < 4096:
                 body = await asyncio.wait_for(reader.readexactly(cl), timeout=5)
@@ -828,12 +1109,9 @@ async def handle_client(reader, writer):
                     count = int(data.get("count", 1))
                     active = int(data.get("active", 0))
                     names = data.get("names", None)
-                    sessions = data.get("sessions", None)
                     if names is not None and not isinstance(names, list):
                         names = None
-                    if sessions is not None and not isinstance(sessions, list):
-                        sessions = None
-                    state = write_tab_state(count, active, names, sessions)
+                    state = write_tab_state(count, active, names)
                     resp = json.dumps(state).encode()
                     writer.write(b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: " + str(len(resp)).encode() + b"\r\n\r\n" + resp)
                 except (json.JSONDecodeError, ValueError):
@@ -844,25 +1122,8 @@ async def handle_client(reader, writer):
             writer.close()
             return
 
-        # 删除 session API
-        if path.startswith("/api/session/") and method == "DELETE":
-            session_name = path[13:]  # 提取 session 名称
-            try:
-                # 删除 zellij session
-                import subprocess
-                subprocess.run(
-                    [os.path.expanduser("~/.local/bin/zellij"), "delete-session", "-f", session_name],
-                    capture_output=True,
-                    timeout=5
-                )
-                writer.write(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nOK")
-            except Exception as e:
-                writer.write(f"HTTP/1.1 500 Internal Server Error\r\nContent-Length: {len(str(e))}\r\n\r\n{str(e)}".encode())
-            await writer.drain()
-            writer.close()
-            return
-
         if path == "/" and method == "GET" and not is_ws:
+            # Serve custom page: fetch Zellij's /shared and inject our UI
             await serve_custom_page(reader, writer, headers, header_text)
             return
 
@@ -878,26 +1139,16 @@ async def handle_client(reader, writer):
         except Exception:
             pass
 
-
 async def serve_custom_page(reader, writer, headers, raw_header):
+    """Fetch Zellij's /shared page and inject our UI"""
     try:
+        # Connect to Zellij
         zr, zw = await asyncio.open_connection(ZELLIJ, ZELLIJ_PORT, ssl=client_ctx)
         
-        # 从 URL 参数获取 session 名称
+        # Request /shared?session=default (fixed session name for multi-device sharing)
         lines = raw_header.split("\r\n")
-        request_line = lines[0]
-        session_name = "default"
-        
-        # 解析 URL 参数
-        if "?" in request_line:
-            path_part, query_part = request_line.split("?", 1)
-            for param in query_part.split("&"):
-                if param.startswith("session="):
-                    session_name = param[8:]  # 提取 session 值
-                    break
-        
-        # 构造新的请求行
-        lines[0] = f"GET /shared?session={session_name} HTTP/1.1"
+        lines[0] = "GET /shared?session=default HTTP/1.1"
+        # Ensure Host header points to Zellij
         for i, line in enumerate(lines[1:], 1):
             if line.lower().startswith("host:"):
                 lines[i] = f"Host: {ZELLIJ}:{ZELLIJ_PORT}"
@@ -907,20 +1158,24 @@ async def serve_custom_page(reader, writer, headers, raw_header):
         zw.write(new_header.encode())
         await zw.drain()
         
+        # Read response
         resp_head = await asyncio.wait_for(zr.readuntil(b"\r\n\r\n"), timeout=30)
         resp_text = resp_head.decode("utf-8", errors="replace")
         status = resp_text.split("\r\n")[0]
         
+        # Parse response headers
         rh = {}
         for line in resp_text.split("\r\n")[1:]:
             if ":" in line:
                 k, v = line.split(":", 1)
                 rh[k.strip().lower()] = v.strip()
         
+        # Read body
         cl = int(rh.get("content-length", 0))
         if cl > 0:
             body_bytes = await asyncio.wait_for(zr.readexactly(cl), timeout=30)
         else:
+            # Read until connection closes
             body_parts = []
             while True:
                 chunk = await asyncio.wait_for(zr.read(65536), timeout=30)
@@ -929,23 +1184,46 @@ async def serve_custom_page(reader, writer, headers, raw_header):
                 body_parts.append(chunk)
             body_bytes = b"".join(body_parts)
         
+        # Modify HTML: inject our CSS, HTML, and JS
         if b"</head>" in body_bytes:
+            # Inject session name setting before WebSocket interceptor
+            session_script = b'<script>window.sessionName = "default";</script>'
             body_bytes = body_bytes.replace(b"</head>", INJECT_CSS.encode() + b"\n</head>")
         if b"<body" in body_bytes:
+            # Inject auto-login script right after <body> tag, before module scripts
+            body_bytes = body_bytes.replace(
+                b"<body",
+                b"<body",
+                1
+            )
+            # Find <body...> and inject after it
+            import re
             body_tag = re.search(b'<body[^>]*>', body_bytes)
             if body_tag:
                 old_tag = body_tag.group()
                 new_tag = old_tag + b"\n<script>window.sessionName = \"default\";</script>\n" + INJECT_WS_INTERCEPT.encode() + b"\n" + INJECT_AUTH.encode()
                 body_bytes = body_bytes.replace(old_tag, new_tag, 1)
         if b"</body>" in body_bytes:
+            # First, wrap terminal div in term-wrap if not already wrapped
+            # Use regex-like replace: <div id="terminal" ...> -> <div id="term-wrap"><div id="terminal" ...>
+            import re
+            # Pattern to match <div id="terminal" followed by any attributes
             pattern = b'<div id="terminal"[^>]*>'
             replacement = b'<div id="term-wrap"><div id="terminal"'
+            # We need to preserve the original attributes
+            # Find the opening tag and replace it
             match = re.search(pattern, body_bytes)
             if match:
+                # Get the full opening tag
                 opening_tag = match.group()
+                # Replace with wrapped version, preserving original tag
                 new_tag = replacement + opening_tag[len(b'<div id="terminal"'):]
                 body_bytes = body_bytes.replace(opening_tag, new_tag)
+                # Now we need to close term-wrap before </body>. We'll add a script to do it dynamically.
+                # Actually, we can just add a closing div after terminal, but we don't know where terminal ends.
+                # Let's use JavaScript to wrap it if not already wrapped.
                 wrap_script = b"""<script>
+// Wrap terminal in term-wrap if not already wrapped
 var termDiv = document.getElementById('terminal');
 if (termDiv && !document.getElementById('term-wrap')) {
     var wrap = document.createElement('div');
@@ -955,16 +1233,22 @@ if (termDiv && !document.getElementById('term-wrap')) {
 }
 </script>"""
                 body_bytes = body_bytes.replace(b"</body>", wrap_script + b"\n</body>")
+            # Now inject HTML and JS before </body>
             body_bytes = body_bytes.replace(b"</body>", INJECT_HTML.encode() + b"\n</body>")
-            inject_js = INJECT_JS_TEMPLATE.replace("{username}", CURRENT_USER)
+            # Generate INJECT_JS with current username
+            import os
+            current_user = os.environ.get("USER", os.environ.get("LOGNAME", "user"))
+            inject_js = INJECT_JS_TEMPLATE.replace("{username}", current_user)
             body_bytes = body_bytes.replace(b"</body>", inject_js.encode() + b"\n</body>")
         
+        # Build response
         out_headers = []
         for k, v in rh.items():
             if k == "content-length":
                 continue
             if k == "content-security-policy":
-                v = "default-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; connect-src 'self' ws: wss:; img-src 'self' data:"
+                # Allow inline scripts (our injected UI) and unsafe-eval
+                v = "default-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; connect-src 'self' ws: wss:; img-src 'self' data:"
             out_headers.append(f"{k}: {v}")
         out_headers.append(f"content-length: {len(body_bytes)}")
         
@@ -974,7 +1258,7 @@ if (termDiv && !document.getElementById('term-wrap')) {
         zw.close()
         
     except Exception as e:
-        import traceback
+        import traceback, sys
         print(f"Error in serve_custom_page: {e}", file=sys.stderr, flush=True)
         traceback.print_exc(file=sys.stderr)
         msg = f"Error: {type(e).__name__}: {e}"
@@ -984,112 +1268,135 @@ if (termDiv && !document.getElementById('term-wrap')) {
             f"Connection: close\r\n\r\n{msg}".encode()
         )
         await writer.drain()
+    finally:
         try:
             writer.close()
         except Exception:
             pass
 
+async def proxy_ws(reader, writer, raw_header):
+    try:
+        zr, zw = await asyncio.open_connection(ZELLIJ, ZELLIJ_PORT, ssl=client_ctx)
+        zw.write(raw_header.encode())
+        await zw.drain()
+        await asyncio.gather(pipe(reader, zw), pipe(zr, writer))
+    except Exception:
+        pass
+    finally:
+        try:
+            writer.close()
+        except Exception:
+            pass
 
 async def proxy_http(reader, writer, headers, raw_header):
     try:
         zr, zw = await asyncio.open_connection(ZELLIJ, ZELLIJ_PORT, ssl=client_ctx)
-        
-        lines = raw_header.split("\r\n")
-        for i, line in enumerate(lines[1:], 1):
-            if line.lower().startswith("host:"):
-                lines[i] = f"Host: {ZELLIJ}:{ZELLIJ_PORT}"
-                break
-        new_header = "\r\n".join(lines)
-        
+        zw.write(raw_header.encode())
+        await zw.drain()
+
         cl = int(headers.get("content-length", 0))
-        body = b""
         if cl > 0:
             body = await asyncio.wait_for(reader.readexactly(cl), timeout=30)
-        
-        zw.write(new_header.encode() + body)
-        await zw.drain()
-        
+            zw.write(body)
+            await zw.drain()
+
         resp_head = await asyncio.wait_for(zr.readuntil(b"\r\n\r\n"), timeout=30)
         resp_text = resp_head.decode("utf-8", errors="replace")
-        
+        status = resp_text.split("\r\n")[0]
+
         rh = {}
         for line in resp_text.split("\r\n")[1:]:
             if ":" in line:
                 k, v = line.split(":", 1)
                 rh[k.strip().lower()] = v.strip()
-        
-        resp_cl = int(rh.get("content-length", 0))
-        resp_body = b""
-        if resp_cl > 0:
-            resp_body = await asyncio.wait_for(zr.readexactly(resp_cl), timeout=30)
-        else:
-            while True:
-                chunk = await asyncio.wait_for(zr.read(65536), timeout=5)
+
+        body_parts = []
+        content_length = int(rh.get("content-length", 0))
+        if content_length > 0:
+            # Read exactly content_length bytes
+            remaining = content_length
+            while remaining > 0:
+                chunk = await asyncio.wait_for(zr.read(min(remaining, 65536)), timeout=15)
                 if not chunk:
                     break
-                resp_body += chunk
-        
-        out_headers = []
-        for k, v in rh.items():
-            if k == "content-security-policy":
-                v = "default-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; connect-src 'self' ws: wss:; img-src 'self' data:"
-            out_headers.append(f"{k}: {v}")
-        
-        resp_out = resp_text.split("\r\n")[0] + "\r\n" + "\r\n".join(out_headers) + "\r\n\r\n"
-        writer.write(resp_out.encode() + resp_body)
-        await writer.drain()
-        zw.close()
-        writer.close()
-        
-    except Exception:
-        try:
-            writer.close()
-        except Exception:
-            pass
-
-
-async def proxy_ws(reader, writer, raw_header):
-    try:
-        zr, zw = await asyncio.open_connection(ZELLIJ, ZELLIJ_PORT, ssl=client_ctx)
-        
-        lines = raw_header.split("\r\n")
-        for i, line in enumerate(lines[1:], 1):
-            if line.lower().startswith("host:"):
-                lines[i] = f"Host: {ZELLIJ}:{ZELLIJ_PORT}"
-                break
-        new_header = "\r\n".join(lines)
-        
-        zw.write(new_header.encode())
-        await zw.drain()
-        
-        async def forward(src, dst):
+                body_parts.append(chunk)
+                remaining -= len(chunk)
+        else:
+            # No content-length: read until timeout (short)
             try:
                 while True:
-                    data = await src.read(65536)
-                    if not data:
+                    chunk = await asyncio.wait_for(zr.read(65536), timeout=2)
+                    if not chunk:
                         break
-                    dst.write(data)
-                    await dst.drain()
-            except Exception:
+                    body_parts.append(chunk)
+            except asyncio.TimeoutError:
                 pass
-        
-        await asyncio.gather(
-            forward(reader, zw),
-            forward(zr, writer)
+        body_bytes = b"".join(body_parts)
+        # Inject fix for HTML pages
+        is_html = "text/html" in rh.get("content-type", "")
+        if is_html:
+            if b"</head>" in body_bytes:
+                body_bytes = body_bytes.replace(b"</head>", INJECT_CSS.encode() + b"\n</head>")
+            if b"</body>" in body_bytes:
+                body_bytes = body_bytes.replace(b"</body>", INJECT_JS.encode() + b"\n</body>")
+
+        out_headers = []
+        for k, v in rh.items():
+            if k == "x-frame-options":
+                continue
+            if k == "content-security-policy":
+                # Allow inline scripts (our injected UI) and unsafe-eval
+                v = "default-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; connect-src 'self' ws: wss:; img-src 'self' data:"
+            if k == "content-length":
+                continue
+            out_headers.append(f"{k}: {v}")
+        out_headers.append(f"content-length: {len(body_bytes)}")
+
+        resp_out = status + "\r\n" + "\r\n".join(out_headers) + "\r\n\r\n"
+        writer.write(resp_out.encode() + body_bytes)
+        await writer.drain()
+        zw.close()
+
+    except Exception as e:
+        import traceback
+        print(f"[PROXY] asset error: {e}", flush=True)
+        traceback.print_exc()
+        msg = f"Error: {e}"
+        writer.write(
+            f"HTTP/1.1 502 Bad Gateway\r\n"
+            f"Content-Length: {len(msg)}\r\n"
+            f"Connection: close\r\n\r\n{msg}".encode()
         )
-        
-    except Exception:
+        await writer.drain()
+    finally:
         try:
             writer.close()
         except Exception:
             pass
 
+async def pipe(src, dst):
+    try:
+        while True:
+            data = await src.read(65536)
+            if not data:
+                break
+            dst.write(data)
+            await dst.drain()
+    except Exception:
+        pass
+    finally:
+        try:
+            dst.close()
+        except Exception:
+            pass
 
 async def main():
-    ssl_ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
-    ssl_ctx.load_cert_chain(CERT, KEY)
-    server = await asyncio.start_server(handle_client, "0.0.0.0", LISTEN_PORT, ssl=ssl_ctx)
-    print(f"Proxy listening on 0.0.0.0:{LISTEN_PORT}")
+    ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    ctx.load_cert_chain(CERT, KEY)
+    server = await asyncio.start_server(
+        handle_client, "0.0.0.0", LISTEN_PORT, ssl=ctx
+    )
+    print(f"Gateway running on https://0.0.0.0:{LISTEN_PORT}")
     async with server:
         await server.serve_forever()
 
