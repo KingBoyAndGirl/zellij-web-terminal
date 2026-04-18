@@ -253,6 +253,7 @@ INJECT_WS_INTERCEPT = """<script>
     window.WebSocket.CLOSED = OriginalWebSocket.CLOSED;
     
     window.__wsSend = function(data) {
+        console.log("[Btn] __wsSend called:", data.substring(0, 20));
         var ws = window._termWs;
         if (ws && ws.readyState === WebSocket.OPEN) {
             ws.send(data);
