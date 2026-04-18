@@ -31,11 +31,14 @@ def read_tab_state() -> dict:
             state = json.load(f)
         if "names" not in state:
             state["names"] = [CURRENT_USER] * state.get("count", 1)
+        if "sessions" not in state:
+            # 为每个 Tab 生成 session 名称
+            state["sessions"] = [f"tab-{i+1}" for i in range(state.get("count", 1))]
         return state
     except (FileNotFoundError, json.JSONDecodeError):
-        return {"count": 1, "active": 0, "names": [CURRENT_USER], "ts": 0}
+        return {"count": 1, "active": 0, "names": [CURRENT_USER], "sessions": ["tab-1"], "ts": 0}
 
-def write_tab_state(count: int, active: int, names: list = None) -> dict:
+def write_tab_state(count: int, active: int, names: list = None, sessions: list = None) -> dict:
     import time
     count = max(1, count)
     active = max(0, min(active, count - 1))
@@ -50,7 +53,20 @@ def write_tab_state(count: int, active: int, names: list = None) -> dict:
                 names.append(CURRENT_USER)
     else:
         names = names[:count] + [CURRENT_USER] * max(0, count - len(names))
-    state = {"count": count, "active": active, "names": names, "ts": time.time()}
+    
+    if sessions is None:
+        old = read_tab_state()
+        old_sessions = old.get("sessions", [])
+        sessions = []
+        for i in range(count):
+            if i < len(old_sessions):
+                sessions.append(old_sessions[i])
+            else:
+                sessions.append(f"tab-{i+1}")
+    else:
+        sessions = sessions[:count] + [f"tab-{i+1}" for i in range(len(sessions), count)]
+    
+    state = {"count": count, "active": active, "names": names, "sessions": sessions, "ts": time.time()}
     with _tab_lock:
         with open(TAB_STATE_FILE, "w") as f:
             json.dump(state, f)
@@ -385,8 +401,8 @@ INJECT_JS_TEMPLATE = """<script>
             }
         }
 
-        // Tab 系统
-        var tabState = { count: 1, active: 0, ts: 0, names: [] };
+        // Tab 系统 - 每个 Tab 独立 session
+        var tabState = { count: 1, active: 0, ts: 0, names: [], sessions: [] };
         var tabList = document.getElementById('tab-list');
         var TAB_API = '/api/tabs';
 
@@ -432,34 +448,59 @@ INJECT_JS_TEMPLATE = """<script>
         }
 
         function switchToTab(idx) {
-            var diff = idx - tabState.active;
-            if (diff > 0) {
-                for (var i = 0; i < diff; i++) window.__wsSend('\\x1b[1;3C');
-            } else if (diff < 0) {
-                for (var j = 0; j < -diff; j++) window.__wsSend('\\x1b[1;3D');
-            }
+            // 切换到对应的 session
+            var sessionName = tabState.sessions[idx] || ('tab-' + (idx + 1));
             tabState.active = idx;
-            renderTabs();
             saveTabState();
+            // 重新加载页面到对应的 session
+            window.location.href = '/?session=' + encodeURIComponent(sessionName);
         }
 
         function closeTab(idx) {
             if (tabState.count <= 1) return;
-            if (idx !== tabState.active) switchToTab(idx);
-            window.__wsSend('\\x1bx');
+            var sessionToDelete = tabState.sessions[idx];
+            
+            // 删除 session
+            fetch('/api/session/' + encodeURIComponent(sessionToDelete), {
+                method: 'DELETE'
+            }).catch(function(){});
+            
+            // 更新状态
             tabState.names.splice(idx, 1);
+            tabState.sessions.splice(idx, 1);
             tabState.count--;
-            if (tabState.active >= tabState.count) tabState.active = tabState.count - 1;
-            renderTabs();
+            
+            // 确定新的 active
+            var newActive;
+            if (idx < tabState.active) {
+                newActive = tabState.active - 1;
+            } else if (idx === tabState.active) {
+                newActive = Math.min(idx, tabState.count - 1);
+            } else {
+                newActive = tabState.active;
+            }
+            
+            tabState.active = newActive;
             saveTabState();
+            
+            // 跳转到新的 active session
+            var newSession = tabState.sessions[newActive] || ('tab-' + (newActive + 1));
+            window.location.href = '/?session=' + encodeURIComponent(newSession);
         }
 
         function saveTabState() {
             fetch(TAB_API, {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({count: tabState.count, active: tabState.active, names: tabState.names})
-            }).then(function(r){ return r.json(); }).then(function(s){ tabState.ts = s.ts; });
+                body: JSON.stringify({
+                    count: tabState.count,
+                    active: tabState.active,
+                    names: tabState.names,
+                    sessions: tabState.sessions
+                })
+            }).then(function(r){ return r.json(); }).then(function(s){
+                tabState.ts = s.ts;
+            });
         }
 
         function pollTabState() {
@@ -469,6 +510,7 @@ INJECT_JS_TEMPLATE = """<script>
                     tabState.active = s.active;
                     tabState.ts = s.ts;
                     if (s.names) tabState.names = s.names;
+                    if (s.sessions) tabState.sessions = s.sessions;
                     renderTabs();
                 }
             }).catch(function(){});
@@ -483,41 +525,42 @@ INJECT_JS_TEMPLATE = """<script>
                 var now = Date.now();
                 if (now - (window.__btnDebounce['newtab2'] || 0) < 300) return;
                 window.__btnDebounce['newtab2'] = now;
-                window.__wsSend('\\x1bt');
+                
+                // 创建新的 session 名称
+                var newSession = 'tab-' + Date.now();
                 tabState.names.push(DEFAULT_TAB_NAME);
+                tabState.sessions.push(newSession);
                 tabState.count++;
                 tabState.active = tabState.count - 1;
-                renderTabs();
                 saveTabState();
+                
+                // 跳转到新 session
+                window.location.href = '/?session=' + encodeURIComponent(newSession);
             });
         }
 
         document.addEventListener('keydown', function(e) {
             if (e.altKey && e.key === 'n') {
+                var newSession = 'tab-' + Date.now();
                 tabState.names.push(DEFAULT_TAB_NAME);
+                tabState.sessions.push(newSession);
                 tabState.count++;
                 tabState.active = tabState.count - 1;
-                renderTabs();
                 saveTabState();
+                window.location.href = '/?session=' + encodeURIComponent(newSession);
             }
             if (e.altKey && e.key === 'x') {
                 if (tabState.count > 1) {
-                    tabState.names.splice(tabState.active, 1);
-                    tabState.count--;
-                    if (tabState.active >= tabState.count) tabState.active = tabState.count - 1;
+                    closeTab(tabState.active);
                 }
-                renderTabs();
-                saveTabState();
             }
             if (e.altKey && e.key === 'ArrowLeft') {
-                tabState.active = tabState.active > 0 ? tabState.active - 1 : tabState.count - 1;
-                renderTabs();
-                saveTabState();
+                var newIdx = tabState.active > 0 ? tabState.active - 1 : tabState.count - 1;
+                switchToTab(newIdx);
             }
             if (e.altKey && e.key === 'ArrowRight') {
-                tabState.active = tabState.active < tabState.count - 1 ? tabState.active + 1 : 0;
-                renderTabs();
-                saveTabState();
+                var newIdx = tabState.active < tabState.count - 1 ? tabState.active + 1 : 0;
+                switchToTab(newIdx);
             }
         });
 
@@ -785,15 +828,36 @@ async def handle_client(reader, writer):
                     count = int(data.get("count", 1))
                     active = int(data.get("active", 0))
                     names = data.get("names", None)
+                    sessions = data.get("sessions", None)
                     if names is not None and not isinstance(names, list):
                         names = None
-                    state = write_tab_state(count, active, names)
+                    if sessions is not None and not isinstance(sessions, list):
+                        sessions = None
+                    state = write_tab_state(count, active, names, sessions)
                     resp = json.dumps(state).encode()
                     writer.write(b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nAccess-Control-Allow-Origin: *\r\nContent-Length: " + str(len(resp)).encode() + b"\r\n\r\n" + resp)
                 except (json.JSONDecodeError, ValueError):
                     writer.write(b"HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\n\r\n")
             else:
                 writer.write(b"HTTP/1.1 400 Bad Request\r\nContent-Length: 0\r\n\r\n")
+            await writer.drain()
+            writer.close()
+            return
+
+        # 删除 session API
+        if path.startswith("/api/session/") and method == "DELETE":
+            session_name = path[13:]  # 提取 session 名称
+            try:
+                # 删除 zellij session
+                import subprocess
+                subprocess.run(
+                    [os.path.expanduser("~/.local/bin/zellij"), "delete-session", "-f", session_name],
+                    capture_output=True,
+                    timeout=5
+                )
+                writer.write(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nOK")
+            except Exception as e:
+                writer.write(f"HTTP/1.1 500 Internal Server Error\r\nContent-Length: {len(str(e))}\r\n\r\n{str(e)}".encode())
             await writer.drain()
             writer.close()
             return
@@ -819,8 +883,21 @@ async def serve_custom_page(reader, writer, headers, raw_header):
     try:
         zr, zw = await asyncio.open_connection(ZELLIJ, ZELLIJ_PORT, ssl=client_ctx)
         
+        # 从 URL 参数获取 session 名称
         lines = raw_header.split("\r\n")
-        lines[0] = "GET /shared?session=default HTTP/1.1"
+        request_line = lines[0]
+        session_name = "default"
+        
+        # 解析 URL 参数
+        if "?" in request_line:
+            path_part, query_part = request_line.split("?", 1)
+            for param in query_part.split("&"):
+                if param.startswith("session="):
+                    session_name = param[8:]  # 提取 session 值
+                    break
+        
+        # 构造新的请求行
+        lines[0] = f"GET /shared?session={session_name} HTTP/1.1"
         for i, line in enumerate(lines[1:], 1):
             if line.lower().startswith("host:"):
                 lines[i] = f"Host: {ZELLIJ}:{ZELLIJ_PORT}"
