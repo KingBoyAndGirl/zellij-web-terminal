@@ -12,7 +12,7 @@ ZELLIJ = "127.0.0.1"
 ZELLIJ_PORT = 18084
 LISTEN_PORT = 18082
 # Auto-login token (created via: zellij web --create-token)
-AUTO_TOKEN="c94665e2-89e3-4eba-8c9a-463571af1607"
+AUTO_TOKEN="25008711-f1d7-47f8-be7e-de18a1f2b057"
 CERT = "/home/devbox/.local/share/zellij-web/certs/cert.pem"
 KEY = "/home/devbox/.local/share/zellij-web/certs/key.pem"
 WEB_DIR = "/home/devbox/.local/share/zellij-web/config"
