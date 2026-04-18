@@ -326,19 +326,22 @@ INJECT_JS_TEMPLATE = """<script>
     
     var term = null;
     var checkInterval = setInterval(function() {
-        if (window.term && window.term._core) {
+        if (window.term) {
             term = window.term;
             clearInterval(checkInterval);
+            console.log('[Hermes] Terminal ready, initializing buttons');
             init();
         }
     }, 100);
+    // Fallback: after 10s, init anyway
     setTimeout(function() {
-        if (!term && window.term) {
+        if (!term) {
             clearInterval(checkInterval);
             term = window.term;
+            console.log('[Hermes] Timeout fallback, initializing buttons');
             init();
         }
-    }, 5000);
+    }, 10000);
 
     function init() {
         var keyMap = {
