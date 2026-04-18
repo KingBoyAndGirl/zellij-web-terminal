@@ -631,10 +631,7 @@ INJECT_JS_TEMPLATE = """<script>
                 if (now - (window.__btnDebounce['newtab2'] || 0) < 300) return;
                 window.__btnDebounce['newtab2'] = now;
                 window.__wsSend('\\x1bn');
-                // Fullscreen the new tab
-                setTimeout(function() {
-                    window.__wsSend('\\x1bf');
-                }, 500);
+                console.log('[Tab Debug] Sending Alt+n for NewTab');
                 // Use default name without counter
                 tabState.names.push(DEFAULT_TAB_NAME);
                 tabState.count++;
