@@ -484,7 +484,6 @@ INJECT_JS_TEMPLATE = """<script>
                 if (now - (window.__btnDebounce['newtab2'] || 0) < 300) return;
                 window.__btnDebounce['newtab2'] = now;
                 window.__wsSend('\\x1bt');
-                setTimeout(function() { window.__wsSend('\\x1bf'); }, 100);
                 tabState.names.push(DEFAULT_TAB_NAME);
                 tabState.count++;
                 tabState.active = tabState.count - 1;
