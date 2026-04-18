@@ -634,7 +634,7 @@ INJECT_JS_TEMPLATE = """<script>
                 // Fullscreen the new tab
                 setTimeout(function() {
                     window.__wsSend('\\x1bf');
-                }, 100);
+                }, 500);
                 // Use default name without counter
                 tabState.names.push(DEFAULT_TAB_NAME);
                 tabState.count++;
